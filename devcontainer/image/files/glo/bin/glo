@@ -9,6 +9,7 @@ case "${1:-}" in
     agent)     shift; exec "${_GLO_BIN_DIR}/glo-agent" "$@" ;;
     build)     shift; GLO_BUILD_CMD="glo build" exec "${_GLO_BIN_DIR}/glo-build" "$@" ;;
     gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
+    local)     shift; exec "${_GLO_BIN_DIR}/glo-local" "$@" ;;
     notes)     shift; exec "${_GLO_BIN_DIR}/glo-notes" "$@" ;;
     readme)    cat "$README" ;;
     help|--help|-h)
@@ -22,12 +23,13 @@ Commands:
   agent      Agent-aware issue CLI with focus stack (glo-agent --help)
   build      Lightweight build system (glo-build --help)
   gen        Generate a lib component from a template (glo-gen --help)
+  local      Install host dependencies (glo-local --help)
   notes      zk notebook wrapper for base/ (glo-notes --help)
   readme     Print full documentation
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|gen|notes|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|gen|local|notes|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

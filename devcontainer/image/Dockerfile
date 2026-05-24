@@ -299,6 +299,7 @@ COPY files/glo/README.md /opt/glo/README.md
 COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
 COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent
 COPY --chmod=0755 files/glo/bin/glo-gen /opt/glo/bin/glo-gen
+COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build

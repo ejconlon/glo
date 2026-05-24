@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+GHC_VERSION="9.12.4"
+CABAL_VERSION="3.16.1.0"
+STACK_VERSION="3.9.3"
+HLS_VERSION="2.14.0.0"
+RUST_VERSION="1.92.0"
+NODE_VERSION="22.22.0"
+
+DRY_RUN=0
+OS=""
+ARCH=""
+PKG=""
+TS_DONE=0
+
+usage() {
+    cat <<EOF
+glo-local - install local host dependencies for glo workspaces
+
+Usage: glo-local [--dry-run] <command>
+
+Commands:
+  all       Install base, py, rs, hs, ts, ps, notes
+  base      Install common CLI tools
+  py        Install Python/uv tooling
+  rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src
+  hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, ormolu, hlint via ghcup
+  ts        Install Node.js/npm tooling (Node ${NODE_VERSION} in the image)
+  ps        Install PureScript tooling
+  notes     Install zk/sqlite tooling
+  doctor    Print detected OS/arch and tool versions
+
+Supported package managers:
+  Arch Linux: pacman
+  macOS:      brew
+EOF
+}
+
+log() { printf '[I] %s\n' "$*" >&2; }
+warn() { printf '[W] %s\n' "$*" >&2; }
+die() { printf '[E] %s\n' "$*" >&2; exit 1; }
+
+run() {
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf '+ '
+        printf '%q ' "$@"
+        printf '\n'
+    else
+        "$@"
+    fi
+}
+
+detect_platform() {
+    ARCH="$(uname -m)"
+    case "$(uname -s)" in
+        Darwin)
+            OS="macos"
+            command -v brew >/dev/null 2>&1 || die "Homebrew not found. Install brew first: https://brew.sh"
+            PKG="brew"
+            ;;
+        Linux)
+            if [[ -r /etc/arch-release ]]; then
+                OS="arch"
+                command -v pacman >/dev/null 2>&1 || die "pacman not found on Arch Linux"
+                PKG="pacman"
+            else
+                die "Unsupported Linux distribution. glo-local currently supports Arch Linux and macOS."
+            fi
+            ;;
+        *)
+            die "Unsupported OS: $(uname -s)"
+            ;;
+    esac
+}
+
+pkg_install() {
+    (($# > 0)) || return 0
+    case "$PKG" in
+        brew)
+            run brew install "$@"
+            ;;
+        pacman)
+            if [[ "$EUID" -eq 0 ]]; then
+                run pacman -S --needed --noconfirm "$@"
+            else
+                run sudo pacman -S --needed --noconfirm "$@"
+            fi
+            ;;
+        *)
+            die "Package manager not detected"
+            ;;
+    esac
+}
+
+install_base() {
+    log "Installing base tools for ${OS}/${ARCH}"
+    case "$OS" in
+        arch)
+            pkg_install base-devel git github-cli jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip tar gzip bzip2 xz zstd openssh make pkgconf
+            ;;
+        macos)
+            pkg_install git gh jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip xz zstd pkgconf
+            ;;
+    esac
+}
+
+install_py() {
+    log "Installing Python tooling"
+    case "$OS" in
+        arch)
+            pkg_install python python-pip uv
+            ;;
+        macos)
+            pkg_install python uv
+            ;;
+    esac
+}
+
+ensure_rustup() {
+    if command -v rustup >/dev/null 2>&1; then
+        return
+    fi
+    case "$OS" in
+        arch)
+            pkg_install rustup
+            ;;
+        macos)
+            pkg_install rustup-init
+            if ! command -v rustup >/dev/null 2>&1; then
+                run rustup-init -y --no-modify-path
+                export PATH="$HOME/.cargo/bin:$PATH"
+            fi
+            ;;
+    esac
+}
+
+install_rs() {
+    log "Installing Rust ${RUST_VERSION}"
+    ensure_rustup
+    run rustup toolchain install "$RUST_VERSION" --profile minimal
+    run rustup default "$RUST_VERSION"
+    run rustup component add rust-analyzer rust-src rustfmt clippy --toolchain "$RUST_VERSION"
+}
+
+ensure_ghcup() {
+    if command -v ghcup >/dev/null 2>&1; then
+        return
+    fi
+    case "$OS" in
+        arch)
+            pkg_install ghcup-hs
+            ;;
+        macos)
+            pkg_install ghcup
+            ;;
+    esac
+    [[ "$DRY_RUN" -eq 1 ]] && return
+    command -v ghcup >/dev/null 2>&1 || die "ghcup was not found after package install. Install ghcup, then rerun 'glo-local hs'."
+}
+
+link_latest_ghcup_tool() {
+    local tool="$1"
+    local target=""
+    local dest=""
+
+    if [[ "$OS" == "macos" ]]; then
+        dest="/usr/local/bin/${tool}"
+        [[ "$ARCH" == "arm64" ]] && dest="/opt/homebrew/bin/${tool}"
+    else
+        dest="/usr/local/bin/${tool}"
+    fi
+
+    target="$(command -v "${tool}" 2>/dev/null || true)"
+    if [[ -z "$target" ]]; then
+        target="$(compgen -c | grep -E "^${tool}-[0-9]" | sort -V | tail -1 || true)"
+    fi
+    [[ -n "$target" ]] || return 0
+    target="$(command -v "$target")"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        run ln -sf "$target" "$dest"
+    elif [[ -w "$(dirname "$dest")" ]]; then
+        run ln -sf "$target" "$dest"
+    else
+        run sudo ln -sf "$target" "$dest"
+    fi
+}
+
+install_hs() {
+    log "Installing Haskell toolchain via ghcup"
+    ensure_ghcup
+    run ghcup install ghc "$GHC_VERSION" --set
+    run ghcup install cabal "$CABAL_VERSION" --set
+    run ghcup install stack "$STACK_VERSION" --set
+    run ghcup install hls "$HLS_VERSION" --set
+    run ghcup config add-release-channel 3rdparty
+    run ghcup install ormolu
+    run ghcup install hlint
+    link_latest_ghcup_tool ormolu
+    link_latest_ghcup_tool hlint
+}
+
+install_ts() {
+    [[ "$TS_DONE" -eq 1 ]] && return
+    log "Installing TypeScript/Node tooling"
+    case "$OS" in
+        arch)
+            pkg_install nodejs npm
+            ;;
+        macos)
+            pkg_install node@22
+            warn "If node is not on PATH, run: brew link --overwrite --force node@22"
+            ;;
+    esac
+    TS_DONE=1
+}
+
+install_ps() {
+    install_ts
+    log "Installing PureScript tooling"
+    local prefix="${NPM_CONFIG_PREFIX:-$HOME/.local}"
+    run mkdir -p "$prefix"
+    run npm install --global --prefix "$prefix" purescript spago purs-tidy
+    case ":$PATH:" in
+        *":$prefix/bin:"*) ;;
+        *) warn "Add $prefix/bin to PATH to use purs, spago, and purs-tidy" ;;
+    esac
+}
+
+install_notes() {
+    log "Installing notes tooling"
+    case "$OS" in
+        arch)
+            pkg_install zk sqlite
+            ;;
+        macos)
+            pkg_install zk sqlite
+            ;;
+    esac
+}
+
+doctor() {
+    printf 'OS:   %s\n' "$OS"
+    printf 'Arch: %s\n' "$ARCH"
+    printf 'Pkg:  %s\n' "$PKG"
+    for tool in git gh just fd bat rg shellcheck jq yq sqlite3 uv python3 rustup rustc cargo ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
+        else
+            printf '%-32s %s\n' "$tool" "(missing)"
+        fi
+    done
+}
+
+main() {
+    while (($# > 0)); do
+        case "$1" in
+            --dry-run)
+                DRY_RUN=1
+                shift
+                ;;
+            help|--help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    detect_platform
+
+    case "${1:-help}" in
+        all)
+            install_base
+            install_py
+            install_rs
+            install_hs
+            install_ts
+            install_ps
+            install_notes
+            ;;
+        base) install_base ;;
+        py) install_py ;;
+        rs) install_rs ;;
+        hs) install_hs ;;
+        ts) install_ts ;;
+        ps) install_ps ;;
+        notes) install_notes ;;
+        doctor) doctor ;;
+        help|--help|-h) usage ;;
+        *)
+            usage >&2
+            die "Unknown command: $1"
+            ;;
+    esac
+}
+
+main "$@"

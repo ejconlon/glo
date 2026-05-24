@@ -20,3 +20,5 @@ If the workspace already has glo as a submodule:
 2. `./submodules/glo/bootstrap.sh`
 
 Run `glo readme` inside the devcontainer for the full tool reference.
+
+For host-local dependencies, run `bin/glo-local --dry-run all` to inspect the installer, then run the specific subcommands you need. `glo-local` supports Arch Linux via `pacman` and macOS via `brew`.

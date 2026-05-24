@@ -6,7 +6,7 @@ Use glo to manage work in this repository: issues, agent focus, builds, generate
 
 - Run commands from inside the workspace git repository.
 - The workspace root is the nearest parent directory containing `.git`.
-- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, and `glo-notes` directly; `/opt/glo/bin` is on `PATH`.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, `glo-local`, and `glo-notes` directly; `/opt/glo/bin` is on `PATH`.
 - `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes.
 - Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
 - Use issues for durable task state. Use notes for longer-lived project knowledge.
@@ -227,6 +227,24 @@ just precommit                   # run build precommit and notes precommit
 ```
 
 `just shell` delegates to glo's `devcontainer/justfile` and passes the workspace path explicitly. Nested `just` calls preserve it through `GLO_WORKSPACE`.
+
+## Local Host Tooling
+
+Use `glo-local` outside the devcontainer when you want the host OS to have the same toolchain families as the image. It detects Arch Linux or macOS and installs packages with `pacman` or `brew`. Haskell and Rust versions are pinned to the image versions.
+
+```sh
+glo-local doctor                  # show detected OS/arch and installed tools
+glo-local --dry-run all           # print install commands without running them
+glo-local base                    # common CLI tools
+glo-local py                      # Python and uv
+glo-local rs                      # Rust 1.92.0 + rustfmt/clippy/rust-analyzer/rust-src
+glo-local hs                      # GHC 9.12.4, cabal 3.16.1.0, stack 3.9.3, HLS 2.14.0.0, ormolu, hlint via ghcup
+glo-local ts                      # Node/npm
+glo-local ps                      # PureScript tooling via npm
+glo-local notes                   # zk/sqlite
+```
+
+`glo local ...` is equivalent to `glo-local ...`.
 
 ## When Finishing Work
 
