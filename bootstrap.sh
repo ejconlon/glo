@@ -90,15 +90,6 @@ else
     echo "[I] justfile already exists, skipping"
 fi
 
-# Symlink lib/build from glo (required by glo-build)
-if [[ ! -e "${WORKSPACE_DIR}/lib/build" ]]; then
-    BUILD_REL="$(realpath --relative-to="${WORKSPACE_DIR}/lib" "${SCRIPT_DIR}/devcontainer/image/files/glo/lib/build")"
-    ln -sf "$BUILD_REL" "${WORKSPACE_DIR}/lib/build"
-    echo "[I] Created lib/build -> $BUILD_REL"
-else
-    echo "[I] lib/build already exists, skipping"
-fi
-
 # Initialize base/.zk from scaffold
 BASE_ZK="${WORKSPACE_DIR}/base/.zk"
 if [[ ! -e "${BASE_ZK}" ]]; then

@@ -339,7 +339,7 @@ class Script:
             "set -euo pipefail",
             "",
             f"export WORKSPACE=${{WORKSPACE:-{shquote(str(self._workspace))}}}",
-            'export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"',
+            '[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"',
             "",
         ]
         return "\n".join(header + self._lines) + "\n"
@@ -965,6 +965,11 @@ class Command:
 COMMANDS: dict[str, Command] = {}
 
 
+def cli_invocation() -> str:
+    """Return the command name the user used to invoke glo-build."""
+    return os.environ.get("GLO_BUILD_CMD") or Path(sys.argv[0]).name
+
+
 def command(
     name: str,
     help: str,  # noqa: A002 - shadowing builtin is fine here
@@ -1026,7 +1031,9 @@ def cmd_venv_py(script: Script, project: Project, args: list[str]) -> None:
     script.pushd(script.workspace_path(project.abs_path))
     script.unset("VIRTUAL_ENV")
     venv = script.workspace_path(project.venv_path)
+    script.export("UV_PYTHON_INSTALL_DIR", "${WORKSPACE}/.glo/python")
     script.export("UV_PROJECT_ENVIRONMENT", venv)
+    script.raw('if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python3" ]; then rm -rf "$UV_PROJECT_ENVIRONMENT"; fi')
     script.run(["uv", "sync", "--package", project.package_name])
     # Install Playwright Firefox browser if playwright is in any dependency group
     script.raw(
@@ -1144,7 +1151,7 @@ def cmd_pypackage_py(script: Script, project: Project, args: list[str]) -> None:
     # Check venv exists
     script.raw(f"if [ ! -x {shquote(venv_python)} ]; then")
     script.raw(f"    echo 'Virtual environment not found at {venv_python}' >&2")
-    script.raw("    echo 'Please run: ./build.py venv' >&2")
+    script.raw(f"    echo 'Please run: {cli_invocation()} venv' >&2")
     script.raw("    exit 1")
     script.raw("fi")
 
@@ -1537,8 +1544,8 @@ def cmd_repl_ps(script: Script, project: Project, args: list[str]) -> None:
 meta_command("test", "Run all tests (typecheck + unit)", ["typecheck", "unit"])
 meta_command(
     "precommit",
-    "Run gen and all checks (format + lint + test)",
-    ["gen", "format", "lint", "test"],
+    "Sync dependencies, run gen, and all checks (format + lint + test)",
+    ["venv", "gen", "format", "lint", "test"],
 )
 meta_command(
     "all",
@@ -1614,7 +1621,7 @@ def cmd_venv_haskell(script: Script, project: Project, args: list[str]) -> None:
 
 @command("format", "Format code", lang=Lang.Haskell)
 def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> None:
-    """Format Haskell code with fourmolu."""
+    """Format Haskell code with ormolu."""
     del args  # unused
     script.info(f"Formatting {project.path}")
     path = script.workspace_path(project.abs_path)
@@ -1622,16 +1629,17 @@ def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> Non
     dirs = ["src"]
     if (project.abs_path / "test").exists():
         dirs.append("test")
+    script.raw('_ORMOLU_CONF="${WORKSPACE}/config/hs/ormolu.yaml"')
     script.raw(
-        '_FOURMOLU_CONF="${WORKSPACE}/config/hs/fourmolu.yaml"'
-    )
-    script.raw(
-        '[ -f "$_FOURMOLU_CONF" ]'
-        ' && _FOURMOLU_ARGS="--config=$_FOURMOLU_CONF"'
-        " || _FOURMOLU_ARGS="
+        '[ -f "$_ORMOLU_CONF" ]'
+        ' && _ORMOLU_ARGS="--config=$_ORMOLU_CONF"'
+        " || _ORMOLU_ARGS="
     )
     dir_str = " ".join(dirs)
-    script.raw(f"fourmolu $_FOURMOLU_ARGS --mode inplace {dir_str}")
+    script.raw(
+        f"find {dir_str} -name '*.hs' -type f -print0"
+        " | xargs -0 -r ormolu $_ORMOLU_ARGS --mode inplace"
+    )
 
 
 @command("typecheck", "Typecheck code", lang=Lang.Haskell)
@@ -2125,7 +2133,9 @@ def cmd_fetch(script: Script, project: Project, args: list[str]) -> None:
         script.raw("echo 'fetch command is only available for /lib/model' >&2; exit 1")
         return
     if not args:
-        script.raw("echo 'Usage: ./build.py /lib/model fetch MODEL_NAME' >&2; exit 1")
+        script.raw(
+            f"echo 'Usage: {cli_invocation()} /lib/model fetch MODEL_NAME' >&2; exit 1"
+        )
         return
     model_name = args[0]
     script.info(f"Fetching model: {model_name}")
@@ -2140,7 +2150,7 @@ def cmd_bench(script: Script, project: Project, args: list[str]) -> None:
         return
     if not args:
         script.raw(
-            "echo 'Usage: ./build.py /lib/model bench MODEL_NAME [--rounds N] [--json]' >&2; exit 1"
+            f"echo 'Usage: {cli_invocation()} /lib/model bench MODEL_NAME [--rounds N] [--json]' >&2; exit 1"
         )
         return
     model_name = args[0]
@@ -2445,7 +2455,7 @@ def generate_sequential_script(
     add("set -euo pipefail")
     add("")
     add(f"export WORKSPACE=${{WORKSPACE:-{shquote(str(workspace))}}}")
-    add('export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
+    add('[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
     add("")
 
     # Color codes
@@ -2514,7 +2524,7 @@ def generate_parallel_script(
     add("set -uo pipefail  # Note: -e not set, we handle errors ourselves")
     add("")
     add(f"export WORKSPACE=${{WORKSPACE:-{shquote(str(workspace))}}}")
-    add('export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
+    add('[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
     add(f"MAX_JOBS={jobs}")
     add("")
 
@@ -2904,6 +2914,7 @@ exit 0"""
 
 def show_help(all_projects: list[str]) -> None:
     """Print general help with projects and commands."""
+    cli = cli_invocation()
     print("Loupe Build System\n")
 
     # List projects
@@ -2946,17 +2957,16 @@ def show_help(all_projects: list[str]) -> None:
         print(f"  {name:20} {help_text}")
 
     print("\nUsage:")
-    print("  ./build.py                                   # Show this help")
-    print("  ./build.py <project>                         # Show project help")
-    print("  ./build.py <project> <target>                # Run target on project")
-    print(
-        "  ./build.py <command>                         # Run command on all projects"
-    )
-    print("  ./build.py --help                            # Show command-line options")
+    print(f"  {cli}                                   # Show this help")
+    print(f"  {cli} <project>                         # Show project help")
+    print(f"  {cli} <project> <target>                # Run target on project")
+    print(f"  {cli} <command>                         # Run command on all projects")
+    print(f"  {cli} --help                            # Show command-line options")
 
 
 def show_project_help(project_path: str) -> None:
     """Print help for a specific project."""
+    cli = cli_invocation()
     project = Project(project_path)
     config = project.build_config
 
@@ -2997,8 +3007,8 @@ def show_project_help(project_path: str) -> None:
     print()
 
     print("Usage:")
-    print(f"  ./build.py {project_path} <target>          # Run a target")
-    print(f"  ./build.py {project_path} <target> --help   # Show target details")
+    print(f"  {cli} {project_path} <target>          # Run a target")
+    print(f"  {cli} {project_path} <target> --help   # Show target details")
 
 
 def show_target_help(project_path: str, target_name: str) -> None:
@@ -3041,7 +3051,7 @@ def show_target_help(project_path: str, target_name: str) -> None:
         return
 
     print(f"Unknown target: {target_name}")
-    print(f"Run './build.py {project_path}' to see available targets.")
+    print(f"Run '{cli_invocation()} {project_path}' to see available targets.")
 
 
 @dataclass(frozen=True)
@@ -3564,7 +3574,7 @@ def run_sequential(
                 if cmd and cmd.project_only and not target_projects:
                     log_error(
                         f"{item.name} requires a project "
-                        f"(e.g., ./build.py /lib/core {item.name})"
+                        f"(e.g., {cli_invocation()} /lib/core {item.name})"
                     )
                     return 1
 
@@ -3746,10 +3756,11 @@ def main(workspace_root: Path | None = None) -> int:
                     show_project_help(project_path)
                 return 0
 
+    cli = cli_invocation()
     parser = argparse.ArgumentParser(
         description="Lightweight build system for the Loupe monorepo",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Project patterns:
   / or /lib                                All projects
   /py, /ps, /hs, /meta, /rs, /ts          All projects by language
@@ -3765,18 +3776,18 @@ Passing arguments to targets:
   Use -- to pass flags like --help to the target instead of the build system.
 
 Examples:
-  ./build.py                               List all commands
-  ./build.py /py/core format               Format core (by language)
-  ./build.py /lib/core format              Format core (by path)
-  ./build.py format                        Format all projects
-  ./build.py /py ^/py/core precommit       Run precommit on all Python except core
-  ./build.py precommit ^test               Run precommit without running tests
-  ./build.py /py/web dev --port 9000       Run web dev server on port 9000
-  ./build.py /py unit -k test_foo          Run specific tests on all Python projects
-  ./build.py /lib/tuner train -- --help    Pass --help to the train target
-  ./build.py shellcheck /py/core lint      Run shellcheck, then lint core
-  ./build.py --dryrun /py/core precommit   Print script without executing
-  ./build.py -j1 precommit                 Run precommit sequentially
+  {cli}                               List all commands
+  {cli} /py/core format               Format core (by language)
+  {cli} /lib/core format              Format core (by path)
+  {cli} format                        Format all projects
+  {cli} /py ^/py/core precommit       Run precommit on all Python except core
+  {cli} precommit ^test               Run precommit without running tests
+  {cli} /py/web dev --port 9000       Run web dev server on port 9000
+  {cli} /py unit -k test_foo          Run specific tests on all Python projects
+  {cli} /lib/tuner train -- --help    Pass --help to the train target
+  {cli} shellcheck /py/core lint      Run shellcheck, then lint core
+  {cli} --dryrun /py/core precommit   Print script without executing
+  {cli} -j1 precommit                 Run precommit sequentially
 """,
     )
     parser.add_argument(

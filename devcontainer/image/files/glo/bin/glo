@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+README="${_GLO_BIN_DIR}/../README.md"
 
 case "${1:-}" in
-    issue)     shift; exec glo-issue "$@" ;;
-    agent)     shift; exec glo-agent "$@" ;;
-    build)     shift; exec glo-build "$@" ;;
-    gen)       shift; exec glo-gen "$@" ;;
-    notes)     shift; exec glo-notes "$@" ;;
+    issue)     shift; exec "${_GLO_BIN_DIR}/glo-issue" "$@" ;;
+    agent)     shift; exec "${_GLO_BIN_DIR}/glo-agent" "$@" ;;
+    build)     shift; GLO_BUILD_CMD="glo build" exec "${_GLO_BIN_DIR}/glo-build" "$@" ;;
+    gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
+    notes)     shift; exec "${_GLO_BIN_DIR}/glo-notes" "$@" ;;
     readme)    cat "$README" ;;
     help|--help|-h)
         cat <<EOF

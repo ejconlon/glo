@@ -97,7 +97,7 @@ RUN if [ "${RUST_ENABLED}" = "1" ]; then \
     /tmp/rustup-init -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path; \
     rm -f /tmp/rustup-init; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
-    rustup component add rust-analyzer rust-src; \
+    rustup component add rust-analyzer rust-src rustfmt clippy; \
     rustc --version; \
     cargo --version; \
     fi
@@ -242,6 +242,8 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     ghcup config add-release-channel 3rdparty; \
     ghcup install ormolu; \
     ghcup install hlint; \
+    ln -sf /usr/local/.ghcup/bin/ormolu-* /usr/local/bin/ormolu; \
+    ln -sf /usr/local/.ghcup/bin/hlint-* /usr/local/bin/hlint; \
     fi
 
 # Setup home
@@ -303,8 +305,10 @@ COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/
 COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/
-RUN UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
+RUN UV_PYTHON_INSTALL_DIR=/opt/glo/python \
+    UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
     uv sync --project /opt/glo/lib/build --package glo_build --frozen
+RUN chown -R user:user /opt/glo
 
 USER user
 WORKDIR /home/user

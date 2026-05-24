@@ -27,7 +27,6 @@ step "Bootstrap"
 [[ -d base/issue ]]    && ok "base/issue/ created"
 [[ -d base/wiki ]]     && ok "base/wiki/ created"
 [[ -d lib ]]           && ok "lib/ created"
-[[ -L lib/build ]]     && ok "lib/build symlinked"
 [[ -d base/.zk ]]      && ok "base/.zk initialized"
 [[ -f justfile ]]      && ok "justfile created"
 

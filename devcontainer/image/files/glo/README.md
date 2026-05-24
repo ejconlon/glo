@@ -1,195 +1,241 @@
-# /opt/glo
+# glo Agent Guide
 
-Developer tools installed in this container.
+Use glo to manage work in this repository: issues, agent focus, builds, generated libraries, and notes.
 
-## Setup
+## Core Rules
 
-Run `bootstrap.sh` from the root of a git workspace. It creates:
+- Run commands from inside the workspace git repository.
+- The workspace root is the nearest parent directory containing `.git`.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, and `glo-notes` directly; `/opt/glo/bin` is on `PATH`.
+- `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes.
+- Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
+- Use issues for durable task state. Use notes for longer-lived project knowledge.
 
-- `.devcontainer/devcontainer.json`
-- `.devcontainer/image`, a relative symlink to the glo devcontainer image directory
-- `.glo/build`, the host-side `glo_build` venv
-- `bin/glo*`, wrapper scripts that use `/opt/glo/bin` in the container and the checkout copy on the host
-- `base/issue/`, `base/wiki/`, and `base/.zk/`
-- `lib/build`, a relative symlink to the `glo_build` source package
-- `justfile`, with `shell` and `precommit` recipes
+## Workspace Layout
 
-After bootstrapping, run `just shell` from the workspace root to start an interactive devcontainer shell. The generated workspace `justfile` passes the workspace path to `devcontainer/justfile`; nested `just` calls preserve that path through `GLO_WORKSPACE`.
+Bootstrapped workspaces normally contain:
 
-The whole `/opt/glo/lib` directory is not symlinked into workspaces. Only `lib/build` is linked, because `glo-build` needs the `glo_build` Python package source.
+- `base/issue/`: Markdown issues managed by `glo-issue` and `glo-agent`.
+- `base/wiki/`: project notes managed through `glo-notes`/`zk`.
+- `base/.zk/`: zk notebook config and templates.
+- `lib/`: buildable project components.
+- `.glo/build`: host-side venv for glo tooling.
+- `.glo/venv/<project>`: per-project build/dependency state.
+- `.glo/agent/<agent>/focus`: per-agent focus stack.
+- `bin/glo*`: wrappers that use `/opt/glo/bin` in the container and checkout scripts on the host.
 
-Most scripts resolve the workspace root by walking up from `$PWD` to find the nearest `.git` directory.
+`glo-build` uses the glo installation path for its own implementation (`/opt/glo/lib/build` in the container, or the checkout-relative path on the host). Workspaces do not need a `lib/build` symlink.
 
-## Scripts (`/opt/glo/bin/`)
+## Starting Work
 
-All scripts are on `PATH`. Use `glo <command>` as a dispatcher or invoke scripts directly.
+If you have an assigned task, create or choose an issue first.
 
-### glo
-
-Dispatcher for all glo tools.
-
-```
-glo issue [args]       # run glo-issue
-glo agent [args]       # run glo-agent
-glo build [args]       # run glo-build
-glo gen [args]         # run glo-gen
-glo notes [args]       # run glo-notes
-glo readme             # print this file
-glo help               # list commands
+```sh
+glo-agent issue ready
+glo-agent issue create "Short task title"
+glo-agent focus push <issue-id>
 ```
 
-### glo-issue
+If `AGENT_NAME` is set, `glo-agent` tracks ownership and focus under `.glo/agent/$AGENT_NAME/`. Devcontainer lifecycle commands set `AGENT_NAME` automatically for agent sessions.
 
-Minimal ticket system with dependency tracking. Tickets are stored as Markdown files in `base/issue/`. Each ticket has a YAML frontmatter block with `id`, `status`, `priority`, `assignee`, `deps`, and `links` fields, followed by a Markdown body.
+Use `--force` only when intentionally overriding another agent's ownership.
 
+## Issues
+
+Issues are Markdown files in `base/issue/` with YAML frontmatter. IDs are generated from title plus a short hash. Most commands accept partial IDs when unambiguous.
+
+Common commands:
+
+```sh
+glo-issue create "Title"                  # create issue, print ID
+glo-issue ls                              # list issues
+glo-issue ready                           # list open/in-progress issues with closed deps
+glo-issue blocked                         # list issues blocked by open deps
+glo-issue show <id>                       # show issue plus related context
+glo-issue start <id>                      # status: in_progress
+glo-issue close <id>                      # status: closed
+glo-issue status <id> open                # set explicit status
+glo-issue dep <id> <blocker-id>           # make id depend on blocker-id
+glo-issue undep <id> <blocker-id>         # remove dependency
+glo-issue dep tree <id>                   # show dependency tree
+glo-issue dep cycle                       # detect dependency cycles
+glo-issue link <id> <other-id>            # symmetric relation, not blocking
+glo-issue unlink <id> <other-id>          # remove relation
+glo-issue add-note <id> "Update"          # append timestamped note
+glo-issue set-assignee <id> <name>        # assign
+glo-issue set-assignee <id>               # clear assignee
+glo-issue query                           # emit JSON lines
 ```
-glo-issue create [title] [options]   # create a ticket, prints ID
-glo-issue ls [--status=X] [-a X]    # list tickets
-glo-issue ready                      # list tickets with all deps closed
-glo-issue blocked                    # list tickets with unresolved deps
-glo-issue show <id>                  # display ticket with context
-glo-issue start <id>                 # set status to in_progress
-glo-issue close <id>                 # set status to closed
-glo-issue dep <id> <dep-id>          # declare that id depends on dep-id
-glo-issue dep tree <id>              # show dependency tree
-glo-issue link <id> <id>             # link two tickets (symmetric)
-glo-issue add-note <id> [text]       # append timestamped note
-glo-issue query [jq-filter]          # output tickets as JSON
+
+Use dependencies for blocking relationships. Use links for related work that does not block progress.
+
+## Agent Focus
+
+Use `glo-agent` when acting as an agent. It wraps issue operations with ownership checks and a focus stack.
+
+```sh
+glo-agent focus push <id>                 # start issue, assign to self, push focus
+glo-agent focus pop                       # pop current issue, mark it open
+glo-agent focus list                      # show focus stack
+glo-agent focus get                       # print current issue ID
+glo-agent focus show                      # show current issue
+glo-agent focus close                     # close current issue and remove from stack
+glo-agent focus add-note "Update"         # note current issue
+glo-agent focus create "Title"            # create issue and focus it
+glo-agent focus ready                     # focus next ready issue
 ```
 
-Supports partial ID matching — `glo-issue show abc` matches any ticket whose ID contains `abc`. Override the ticket directory with `TICKETS_DIR`.
+Issue commands through `glo-agent`:
 
-### glo-agent
-
-Agent-aware wrapper around `glo-issue` with a focus stack. Set `AGENT_NAME` to scope focus state and issue ownership to a named agent. Without `AGENT_NAME` it behaves as a thin passthrough with focus commands disabled.
-
-Focus state is stored in `.glo/agent/$AGENT_NAME/focus` — a plain text stack of ticket IDs, newest at the bottom.
-
-```
-glo-agent focus push <id>     # push ticket onto stack (marks in_progress, assigns to self)
-glo-agent focus pop           # pop top ticket and marks it open
-glo-agent focus list          # show focus stack
-glo-agent focus get           # print current focus ID
-glo-agent focus show          # display current focus ticket
-glo-agent focus create [title]  # create ticket and push it
-glo-agent focus ready           # push next ready ticket
-
-glo-agent issue list          # table view of all issues with age and assignee
-glo-agent issue create [title] [--unassigned]  # create (auto-assigns to AGENT_NAME)
-glo-agent issue start <id>    # start issue (in_progress + assign to self)
-glo-agent issue close <id>    # close issue (must be assigned to self)
-glo-agent issue pause <id>    # return to open, remove from stack
-glo-agent issue ready [--all] # list ready issues (default: assigned to self or unassigned)
-glo-agent issue blocked [--all]
+```sh
+glo-agent issue list
+glo-agent issue create "Title"            # assigns to AGENT_NAME by default
+glo-agent issue create --unassigned "Title"
+glo-agent issue ready                     # assigned-to-self or unassigned
+glo-agent issue ready --all               # no ownership filter
+glo-agent issue blocked
+glo-agent issue blocked --all
+glo-agent issue start <id>
+glo-agent issue pause <id>
+glo-agent issue close <id>
 glo-agent issue show <id>
-glo-agent issue add-note <id> [text]
+glo-agent issue add-note <id> "Update"
 glo-agent issue block <id> <blocker-id>
-glo-agent issue link <id> <id>
+glo-agent issue link <id> <other-id>
 glo-agent issue assign <id> <name>
 glo-agent issue unassign <id>
-
-glo-agent precommit           # run glo-build --filter=work precommit
 ```
 
-Most mutating commands accept `--force` to override ownership checks.
+Typical agent loop:
 
-### glo-gen
-
-Generates a new `lib/` component from a cookiecutter template in `/opt/glo/templates/`. Output is written into `lib/` at the workspace root.
-
+```sh
+glo-agent issue ready
+glo-agent focus push <id>
+# do the work
+glo-agent focus add-note "Implemented X; validating Y"
+glo-agent precommit
+glo-agent focus close
 ```
+
+## Builds
+
+`glo-build` discovers projects by scanning `lib/**/build.json`. Each project declares a `language`; optional fields include `py_package`, `extra_deps`, `targets`, and `enabled`.
+
+Common commands:
+
+```sh
+glo-build                         # list commands/projects
+glo-build venv                    # sync/fetch dependencies
+glo-build format                  # format all projects
+glo-build lint                    # lint all projects
+glo-build typecheck               # static checks
+glo-build unit                    # unit tests
+glo-build test                    # typecheck + unit
+glo-build precommit               # gen + format + lint + test
+glo-build clean                   # remove build artifacts and project venvs
+```
+
+Select projects and languages:
+
+```sh
+glo-build /                       # all projects
+glo-build /lib/foo format         # one project by path
+glo-build /py test                # all Python projects
+glo-build /rs lint                # all Rust projects
+glo-build /ts typecheck           # all TypeScript projects
+glo-build /hs unit                # all Haskell projects
+glo-build /ps format              # all PureScript projects
+glo-build /py ^/lib/core test     # exclude a project
+glo-build precommit ^test         # precommit without test subtargets
+```
+
+Mode flags:
+
+```sh
+glo-build --local precommit       # plan and execute locally
+glo-build --docker precommit      # plan and execute in Docker
+glo-build --plan-local --exec-docker precommit
+glo-build --plan-docker --exec-local precommit
+```
+
+Inside a container, docker mode is forced back to local mode.
+
+Build state locations:
+
+- `.glo/build`: glo tooling venv in the workspace.
+- `/opt/glo/.venv`: image-provided glo tooling venv.
+- `.glo/venv/<project>`: project-specific dependency/build state.
+
+Language isolation:
+
+| language | tools | state |
+|----------|-------|-------|
+| `py` | uv, ruff, mypy, pytest | `.glo/venv/<name>/` |
+| `ps` | spago, purs, purs-tidy | `.glo/venv/<name>/node_modules`, outputs |
+| `hs` | cabal, fourmolu, hlint | `.glo/venv/<name>/cabal`, `dist-newstyle` |
+| `rs` | cargo, rustfmt, clippy | `.glo/venv/<name>/target` |
+| `ts` | npm, tsc, eslint, prettier, jest | `.glo/venv/<name>/node_modules` |
+| `meta` | custom targets | custom |
+
+## Generating Components
+
+Use `glo-gen` to create a new `lib/` component from templates.
+
+```sh
 glo-gen <type> [cookiecutter-args]
+glo-gen py --no-input name=my_package
+glo-gen rs --no-input name=my_crate
 ```
 
-Available types (all generate `build.json` for glo-build discovery):
+Template types:
 
-- `meta` — build/config component; `language: meta`
-- `py` — Python package (`pyproject.toml`, hatchling); `language: py`
-- `ps` — PureScript library (`spago.yaml`, `package.json`); `language: ps`
-- `hs` — Haskell library (`*.cabal`, `src/Lib.hs`, GHC2021); `language: hs`
-- `rs` — Rust crate (`Cargo.toml`, `src/lib.rs`); `language: rs`
-- `ts` — TypeScript package (`package.json`, `tsconfig.json`); `language: ts`
+- `meta`: build/config component.
+- `py`: Python package.
+- `ps`: PureScript package.
+- `hs`: Haskell package.
+- `rs`: Rust crate.
+- `ts`: TypeScript package.
 
-Cookiecutter is provided by the `glo_build` venv — the same venv priority as `glo-build` (`.glo/build/` first, then `/opt/glo/.venv`).
+Generated projects include `build.json` so `glo-build` can discover them.
 
-### glo-notes
+## Notes
 
-zk notebook wrapper for `base/`. Manages the zk index and generates Markdown index files; also archives closed issues on precommit. Requires `zk` and `sqlite3` on `PATH`.
+`glo-notes` wraps `zk` for the `base/` notebook.
 
-```
-glo-notes index          # run zk index + regenerate TITLES.md and TAGS.md
-glo-notes precommit      # archive closed issues, unarchive open ones, then index
-glo-notes <zk-cmd>       # passed through to zk with ZK_NOTEBOOK_DIR=base/
-```
-
-The `base/` directory is a zk notebook with two groups:
-
-- `issue/` — zk-tracked issue notes (status-based archiving on precommit)
-- `wiki/` — zk-tracked wiki notes
-
-`bootstrap.sh` creates `base/.zk/config.toml` and `base/.zk/templates/` from the glo scaffold. The `notebook.db` sqlite index is gitignored.
-
-Index files (`TITLES.md`, `TAGS.md`) are generated per-group and at the `base/` root.
-
-### glo-build
-
-Lightweight build system backed by the `glo_build` Python package in `lib/build/`. Separates planning (Python) from execution (shell script) so build plans can be inspected before running.
-
-```
-glo-build [mode] <target> [args]
+```sh
+glo-notes index                  # update zk index and generated indexes
+glo-notes precommit              # archive closed issues, unarchive open ones, index
+glo-notes <zk-cmd>               # pass through to zk with ZK_NOTEBOOK_DIR=base/
 ```
 
-Execution mode flags (can be combined for split plan/exec):
+Notes layout:
 
-```
---local           plan and execute locally (default outside container)
---docker          plan and execute in Docker
---plan-local / --plan-docker    control where planning runs
---exec-local / --exec-docker    control where execution runs
-```
+- `base/issue/`: issue notes; closed issues are archived by `glo-notes precommit`.
+- `base/wiki/`: project wiki notes.
+- `base/**/TITLES.md`: generated title index.
+- `base/**/TAGS.md`: generated tag index.
 
-The build venv is resolved in priority order: `.glo/build/` in the workspace (local override), then `/opt/glo/.venv` (image default), creating one if neither exists.
+The SQLite index at `base/.zk/notebook.db` is generated and gitignored.
 
-Projects are discovered by finding `build.json` files under `lib/`. Each `build.json` must have a `language` field; optional fields are `py_package`, `extra_deps`, `targets`, and `enabled`.
+## Workspace `justfile`
 
-**Supported languages:**
+Bootstrapped workspaces get a small `justfile`:
 
-| language | tools | venv isolation |
-|----------|-------|----------------|
-| `py` | uv, ruff, mypy, pytest | `.glo/venv/<name>/` via `UV_PROJECT_ENVIRONMENT` |
-| `ps` | spago, purs, purs-tidy | `.glo/venv/<name>/node_modules` via `PS_NODE_MODULES` |
-| `hs` | cabal, fourmolu, hlint | `.glo/venv/<name>/cabal`, `.glo/venv/<name>/dist-newstyle` |
-| `rs` | cargo, rustfmt, clippy | `.glo/venv/<name>/target` via `CARGO_TARGET_DIR` |
-| `ts` | npm, tsc, eslint, prettier, jest | `.glo/venv/<name>/node_modules` via `TS_NODE_MODULES` |
-| `meta` | custom targets only | — |
-
-**Common commands** (run on all projects or a selection):
-
-```
-glo-build venv                   # sync/fetch dependencies
-glo-build format                 # format code
-glo-build lint                   # lint code
-glo-build typecheck              # type/static check
-glo-build unit                   # run unit tests
-glo-build test                   # typecheck + unit
-glo-build precommit              # gen + format + lint + test
-glo-build clean                  # remove build artifacts and venv
+```sh
+just shell                       # start an interactive devcontainer shell
+just precommit                   # run build precommit and notes precommit
 ```
 
-**Project selection:**
+`just shell` delegates to glo's `devcontainer/justfile` and passes the workspace path explicitly. Nested `just` calls preserve it through `GLO_WORKSPACE`.
 
-```
-glo-build /lib/foo format        # single project by path
-glo-build /py format             # all Python projects
-glo-build /rs lint               # all Rust projects
-glo-build /ts typecheck          # all TypeScript projects
-glo-build /hs unit               # all Haskell projects
-glo-build /ps format             # all PureScript projects
-glo-build /                      # all projects
-glo-build /py ^/py/core format   # all Python except /lib/core
-glo-build precommit ^test        # precommit without test subtargets
+## When Finishing Work
+
+Before handing off:
+
+```sh
+glo-agent focus add-note "Summary of changes and validation"
+glo-agent precommit
+glo-agent focus close
 ```
 
-## Library Source
-
-The image contains the packaged glo tooling under `/opt/glo/`. In a bootstrapped workspace, `lib/build` is a relative symlink to the `glo_build` source package from the glo checkout. The rest of `/opt/glo/lib` is not linked into the workspace.
+If work is incomplete, leave the issue open and add a note with the blocker or next step.

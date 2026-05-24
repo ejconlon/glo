@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lightweight build system for the Loupe monorepo.
-# See lib/build/glo_build/cli.py for the implementation.
+# See /opt/glo/lib/build/glo_build/cli.py for the implementation in the image.
 set -euo pipefail
 
 _find_workspace() {
@@ -13,9 +13,19 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-_GLO_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 README="${_GLO_BIN_DIR}/../README.md"
-[[ -d "${WORKSPACE_DIR}/lib/build" ]] || { echo "[E] lib/build not found in $WORKSPACE_DIR" >&2; exit 1; }
+
+if [[ -d "${_GLO_BIN_DIR}/../lib/build" ]]; then
+    GLO_BUILD_PROJECT="$(realpath "${_GLO_BIN_DIR}/../lib/build")"
+elif [[ -d "/opt/glo/lib/build" ]]; then
+    GLO_BUILD_PROJECT="/opt/glo/lib/build"
+elif [[ -d "${WORKSPACE_DIR}/lib/build" ]]; then
+    GLO_BUILD_PROJECT="${WORKSPACE_DIR}/lib/build"
+else
+    echo "[E] glo_build project not found relative to ${_GLO_BIN_DIR}, /opt/glo, or ${WORKSPACE_DIR}" >&2
+    exit 1
+fi
 
 if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/python3" ]]; then
     VENV_DIR="${WORKSPACE_DIR}/.glo/build"
@@ -24,13 +34,17 @@ elif [[ -x "/opt/glo/.venv/bin/python3" ]]; then
 elif [[ "$_GLO_BIN_DIR" == "/opt/glo/bin" ]]; then
     VENV_DIR="/opt/glo/.venv"
     echo "[I] Creating build venv at ${VENV_DIR}" >&2
-    UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
+    UV_PYTHON_INSTALL_DIR=/opt/glo/python UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "$GLO_BUILD_PROJECT" --package glo_build
 else
     VENV_DIR="${WORKSPACE_DIR}/.glo/build"
     echo "[I] Creating build venv at ${VENV_DIR}" >&2
-    UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
+    UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "$GLO_BUILD_PROJECT" --package glo_build
 fi
 PYTHON="${VENV_DIR}/bin/python3"
+if [[ -z "${GLO_BUILD_CMD:-}" ]]; then
+    GLO_BUILD_CMD="$(basename "$0")"
+fi
+export GLO_BUILD_CMD
 
 # Default execution mode: "local" or "docker"
 # Change this to "docker" to run builds in containers by default
@@ -212,7 +226,7 @@ else
             else
                 VENV_DIR="/opt/glo/.venv"
                 echo "[I] Creating build venv at ${VENV_DIR}" >&2
-                UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${CONTAINER_WORKDIR}/lib/build" --package glo_build
+                UV_PYTHON_INSTALL_DIR=/opt/glo/python UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project /opt/glo/lib/build --package glo_build
             fi
             PYTHON="${VENV_DIR}/bin/python3"
             WORKSPACE="$CONTAINER_WORKDIR" "$PYTHON" -m glo_build.cli --plan-path "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}" "$@"

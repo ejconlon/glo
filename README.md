@@ -10,7 +10,7 @@ From the root of your git workspace:
 2. `./submodules/glo/bootstrap.sh`
 3. `just shell`
 
-`bootstrap.sh` creates the devcontainer config, `bin/glo*` wrappers, `base/`, `lib/build`, `.glo/build`, and a workspace `justfile`.
+`bootstrap.sh` creates the devcontainer config, `bin/glo*` wrappers, `base/`, `.glo/build`, and a workspace `justfile`.
 
 ## Existing Workspace
 
