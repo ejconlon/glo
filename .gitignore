@@ -1,5 +1,5 @@
-.devcontainer/
-.glo/
-bin/
-base/
-lib/
+/.devcontainer
+/.glo
+/bin
+/base
+/lib

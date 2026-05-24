@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+_find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        [[ -d "$d/.git" ]] && { echo "$d"; return 0; }
+        d="$(dirname "$d")"
+    done
+    echo "[E] No .git directory found from $PWD upward" >&2
+    return 1
+}
+WORKSPACE_DIR="$(_find_workspace)"
+_GLO_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATES_DIR="${_GLO_BIN_DIR}/../templates"
+
+if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/cookiecutter" ]]; then
+    COOKIECUTTER="${WORKSPACE_DIR}/.glo/build/bin/cookiecutter"
+elif [[ -x "/opt/glo/.venv/bin/cookiecutter" ]]; then
+    COOKIECUTTER="/opt/glo/.venv/bin/cookiecutter"
+elif [[ "$_GLO_BIN_DIR" == "/opt/glo/bin" ]]; then
+    COOKIECUTTER="/opt/glo/.venv/bin/cookiecutter"
+else
+    COOKIECUTTER="${WORKSPACE_DIR}/.glo/build/bin/cookiecutter"
+fi
+
+_types=()
+for _t in "${TEMPLATES_DIR}"/*/; do
+    [[ -d "$_t" ]] && _types+=("$(basename "$_t")")
+done
+
+usage() {
+    echo "glo-gen - generate a lib component from a template" >&2
+    echo "" >&2
+    echo "Usage: glo-gen <type> [cookiecutter-args]" >&2
+    echo "" >&2
+    echo "Types: ${_types[*]}" >&2
+    echo "" >&2
+    echo "Output goes to lib/ in the workspace root." >&2
+    exit 1
+}
+
+[[ $# -lt 1 || "$1" == "--help" || "$1" == "-h" ]] && usage
+
+TYPE="$1"; shift
+TEMPLATE="${TEMPLATES_DIR}/${TYPE}"
+
+if [[ ! -d "$TEMPLATE" ]]; then
+    echo "[E] Unknown type '${TYPE}'. Available: ${_types[*]}" >&2
+    exit 1
+fi
+
+exec "$COOKIECUTTER" "$TEMPLATE" --output-dir "${WORKSPACE_DIR}/lib" "$@"

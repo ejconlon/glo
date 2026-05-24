@@ -77,6 +77,6 @@ add_to_gitignore() {
     fi
 }
 
-add_to_gitignore ".glo/"
+add_to_gitignore "/.glo"
 
 echo "[I] Done. To build: just -f ${SCRIPT_DIR}/devcontainer/justfile build"
