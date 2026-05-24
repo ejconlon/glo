@@ -1,0 +1,24 @@
+[note]
+template = "default.md"
+exclude = ["**/archive/**", "**/TITLES.md", "**/TAGS.md"]
+
+[group.wiki.note]
+filename = "wiki/{{slug title}}"
+template = "wiki.md"
+
+[group.issue.note]
+filename = "issue/{{slug title}}-{{random-hex 4}}"
+template = "issue.md"
+
+[format.markdown]
+link-format = "wiki"
+hashtags = true
+colon-tags = false
+multiword-tags = false
+
+[lsp.diagnostics]
+dead-link = "error"
+
+[alias]
+wiki = "zk new --group wiki $@"
+issue = "zk new --group issue $@"

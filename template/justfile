@@ -1,0 +1,11 @@
+glo := "__GLO__"
+
+default:
+    @just --list
+
+shell:
+    just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" shell
+
+precommit:
+    bin/glo-build --filter=work precommit
+    bin/glo-notes precommit

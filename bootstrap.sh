@@ -67,6 +67,26 @@ do
     fi
 done
 
+# Generate justfile from template, substituting the relative path to glo
+if [[ ! -e "${WORKSPACE_DIR}/justfile" ]]; then
+    GLO_REL="$(realpath --relative-to="${WORKSPACE_DIR}" "${SCRIPT_DIR}")"
+    sed "s|__GLO__|${GLO_REL}|g" \
+        "${SCRIPT_DIR}/template/justfile" \
+        > "${WORKSPACE_DIR}/justfile"
+    echo "[I] Created justfile (glo at ${GLO_REL})"
+else
+    echo "[I] justfile already exists, skipping"
+fi
+
+# Initialize base/.zk from scaffold
+BASE_ZK="${WORKSPACE_DIR}/base/.zk"
+if [[ ! -e "${BASE_ZK}" ]]; then
+    cp -r "${SCRIPT_DIR}/devcontainer/image/files/glo/base-scaffold/.zk" "${BASE_ZK}"
+    echo "[I] Created base/.zk"
+else
+    echo "[I] base/.zk already exists, skipping"
+fi
+
 # Add generated paths to .gitignore
 add_to_gitignore() {
     local entry="$1"
@@ -78,5 +98,6 @@ add_to_gitignore() {
 }
 
 add_to_gitignore "/.glo"
+add_to_gitignore "/base/.zk/notebook.db"
 
 echo "[I] Done. To build: just -f ${SCRIPT_DIR}/devcontainer/justfile build"

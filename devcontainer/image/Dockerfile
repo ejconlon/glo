@@ -297,10 +297,12 @@ COPY files/glo/README.md /opt/glo/README.md
 COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
 COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent
 COPY --chmod=0755 files/glo/bin/glo-gen /opt/glo/bin/glo-gen
+COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/
+COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/
 RUN UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
     uv sync --project /opt/glo/lib/build --package glo_build --frozen
 

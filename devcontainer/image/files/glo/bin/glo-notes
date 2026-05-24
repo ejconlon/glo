@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+_find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        [[ -d "$d/.git" ]] && { echo "$d"; return 0; }
+        d="$(dirname "$d")"
+    done
+    echo "[E] No .git directory found from $PWD upward" >&2
+    return 1
+}
+
+WORKSPACE_DIR="$(_find_workspace)"
+BASE_DIR="${WORKSPACE_DIR}/base"
+ZK_DB="${BASE_DIR}/.zk/notebook.db"
+
+_gen_titles() {
+    local output_file="$1"
+    local path_filter="${2:-}"
+    local where_clause="WHERE title != '' AND path NOT LIKE '%/archive/%'"
+    if [[ -n "$path_filter" ]]; then
+        where_clause="$where_clause AND path LIKE '${path_filter}%'"
+    fi
+    sqlite3 "$ZK_DB" <<SQL > "$output_file"
+.mode list
+SELECT '# Note Titles Index
+
+All notes sorted alphabetically by title.
+
+';
+SELECT '- [' || title || '](' || path || ')'
+FROM notes
+${where_clause}
+ORDER BY title COLLATE NOCASE;
+SQL
+}
+
+_gen_tags() {
+    local output_file="$1"
+    local path_filter="${2:-}"
+    local path_condition=""
+    if [[ -n "$path_filter" ]]; then
+        path_condition="AND n.path LIKE '${path_filter}%'"
+    fi
+    python3 <<PYEOF > "$output_file"
+import sqlite3
+conn = sqlite3.connect('${ZK_DB}')
+cursor = conn.cursor()
+print("# Tags Index\n")
+print("All notes organized by tags.\n")
+cursor.execute("""
+    SELECT c.name as tag, n.title, n.path
+    FROM collections c
+    JOIN notes_collections nc ON c.id = nc.collection_id
+    JOIN notes n ON nc.note_id = n.id
+    WHERE c.kind = 'tag'
+      AND n.path NOT LIKE '%/archive/%'
+      ${path_condition}
+    ORDER BY c.name, n.title COLLATE NOCASE
+""")
+current_tag = None
+for row in cursor:
+    tag, title, path = row
+    if tag != current_tag:
+        if current_tag is not None:
+            print()
+        print(f"## {tag}\n")
+        current_tag = tag
+    print(f"- [{title}]({path})")
+conn.close()
+PYEOF
+}
+
+cmd_index() {
+    [[ -d "${BASE_DIR}/.zk" ]] || { echo "[E] base/.zk not found - run bootstrap.sh first" >&2; exit 1; }
+    echo "[I] Indexing notes..."
+    ZK_NOTEBOOK_DIR="$BASE_DIR" zk index --quiet
+    local subdir subdir_path
+    for subdir in issue wiki; do
+        subdir_path="${BASE_DIR}/${subdir}"
+        if [[ -d "$subdir_path" ]]; then
+            echo "[I] Generating indices for ${subdir}/"
+            _gen_titles "${subdir_path}/TITLES.md" "${subdir}/"
+            _gen_tags "${subdir_path}/TAGS.md" "${subdir}/"
+        fi
+    done
+    _gen_titles "${BASE_DIR}/TITLES.md"
+    _gen_tags "${BASE_DIR}/TAGS.md"
+    echo "[I] Done"
+}
+
+_extract_frontmatter_field() {
+    local filepath="$1"
+    local field="$2"
+    local in_fm=0
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" == "---" ]]; then
+            if [[ $in_fm -eq 0 ]]; then in_fm=1; else break; fi
+        elif [[ $in_fm -eq 1 ]] && [[ "$line" =~ ^${field}:[[:space:]]*(.+)$ ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return
+        fi
+    done < "$filepath"
+}
+
+_archive_file() {
+    local filepath="$1"
+    local archive_dir
+    archive_dir="$(dirname "$filepath")/archive"
+    mkdir -p "$archive_dir"
+    mv "$filepath" "$archive_dir/$(basename "$filepath")"
+    echo "[I] Archived: ${filepath#"${BASE_DIR}/"}"
+}
+
+_unarchive_file() {
+    local filepath="$1"
+    local parent_dir
+    parent_dir="$(dirname "$(dirname "$filepath")")"
+    mv "$filepath" "$parent_dir/$(basename "$filepath")"
+    echo "[I] Unarchived: ${filepath#"${BASE_DIR}/"}"
+}
+
+cmd_precommit() {
+    [[ -d "${BASE_DIR}/.zk" ]] || { echo "[E] base/.zk not found - run bootstrap.sh first" >&2; exit 1; }
+
+    local issue_dir="${BASE_DIR}/issue"
+    local archive_dir="${BASE_DIR}/issue/archive"
+    local count status filepath
+
+    if [[ -d "$issue_dir" ]]; then
+        echo "[I] Checking for closed issues to archive..."
+        count=0
+        while IFS= read -r -d '' filepath; do
+            [[ "$filepath" == *"/archive/"* ]] && continue
+            [[ "$(basename "$filepath")" == "TITLES.md" ]] && continue
+            [[ "$(basename "$filepath")" == "TAGS.md" ]] && continue
+            status="$(_extract_frontmatter_field "$filepath" status)"
+            if [[ "$status" == "closed" ]]; then
+                _archive_file "$filepath"
+                ((count++)) || true
+            fi
+        done < <(find "$issue_dir" -name "*.md" -type f -print0 2>/dev/null)
+        [[ $count -gt 0 ]] && echo "[I] Archived $count closed issue(s)"
+    fi
+
+    if [[ -d "$archive_dir" ]]; then
+        echo "[I] Checking for non-closed issues in archive..."
+        count=0
+        while IFS= read -r -d '' filepath; do
+            [[ "$(basename "$filepath")" == "TITLES.md" ]] && continue
+            [[ "$(basename "$filepath")" == "TAGS.md" ]] && continue
+            status="$(_extract_frontmatter_field "$filepath" status)"
+            if [[ "$status" != "closed" ]]; then
+                _unarchive_file "$filepath"
+                ((count++)) || true
+            fi
+        done < <(find "$archive_dir" -name "*.md" -type f -print0 2>/dev/null)
+        [[ $count -gt 0 ]] && echo "[I] Unarchived $count issue(s)"
+    fi
+
+    cmd_index
+}
+
+usage() {
+    echo "glo-notes - zk notebook wrapper for base/" >&2
+    echo "" >&2
+    echo "Usage: glo-notes <command> [args]" >&2
+    echo "" >&2
+    echo "Commands:" >&2
+    echo "  index       Update zk index and regenerate TITLES.md / TAGS.md" >&2
+    echo "  precommit   Archive closed issues, then run index" >&2
+    echo "  <zk-cmd>    Passed through to zk with ZK_NOTEBOOK_DIR=base/" >&2
+    exit 1
+}
+
+[[ $# -lt 1 || "$1" == "--help" || "$1" == "-h" ]] && usage
+
+case "$1" in
+    index)     shift; cmd_index "$@" ;;
+    precommit) shift; cmd_precommit "$@" ;;
+    *)         exec env ZK_NOTEBOOK_DIR="$BASE_DIR" zk "$@" ;;
+esac

@@ -18,6 +18,8 @@ Dispatcher for all glo tools.
 glo issue [args]       # run glo-issue
 glo agent [args]       # run glo-agent
 glo build [args]       # run glo-build
+glo gen [args]         # run glo-gen
+glo notes [args]       # run glo-notes
 glo readme             # print this file
 glo help               # list commands
 ```
@@ -95,6 +97,25 @@ Available types (all generate `build.json` for glo-build discovery):
 - `ts` — TypeScript package (`package.json`, `tsconfig.json`); `language: ts`
 
 Cookiecutter is provided by the `glo_build` venv — the same venv priority as `glo-build` (`.glo/build/` first, then `/opt/glo/.venv`).
+
+### glo-notes
+
+zk notebook wrapper for `base/`. Manages the zk index and generates Markdown index files; also archives closed issues on precommit. Requires `zk` and `sqlite3` on `PATH`.
+
+```
+glo-notes index          # run zk index + regenerate TITLES.md and TAGS.md
+glo-notes precommit      # archive closed issues, unarchive open ones, then index
+glo-notes <zk-cmd>       # passed through to zk with ZK_NOTEBOOK_DIR=base/
+```
+
+The `base/` directory is a zk notebook with two groups:
+
+- `issue/` — zk-tracked issue notes (status-based archiving on precommit)
+- `wiki/` — zk-tracked wiki notes
+
+`bootstrap.sh` creates `base/.zk/config.toml` and `base/.zk/templates/` from the glo scaffold. The `notebook.db` sqlite index is gitignored.
+
+Index files (`TITLES.md`, `TAGS.md`) are generated per-group and at the `base/` root.
 
 ### glo-build
 
