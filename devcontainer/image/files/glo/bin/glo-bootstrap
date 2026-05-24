@@ -15,8 +15,8 @@ README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
 
 echo "[I] Bootstrapping workspace at $WORKSPACE_DIR"
 
-mkdir -p "${WORKSPACE_DIR}/notes/issue"
-echo "[I] Created notes/issue/"
+mkdir -p "${WORKSPACE_DIR}/base/issue"
+echo "[I] Created base/issue/"
 
 if [[ ! -e "${WORKSPACE_DIR}/lib" ]]; then
     ln -s /opt/glo/lib "${WORKSPACE_DIR}/lib"

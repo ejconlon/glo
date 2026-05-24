@@ -13,10 +13,23 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+_GLO_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+README="${_GLO_BIN_DIR}/../README.md"
 [[ -d "${WORKSPACE_DIR}/lib/build" ]] || { echo "[E] lib/build not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
 
-VENV_DIR="/opt/glo/.venv"
+if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/python3" ]]; then
+    VENV_DIR="${WORKSPACE_DIR}/.glo/build"
+elif [[ -x "/opt/glo/.venv/bin/python3" ]]; then
+    VENV_DIR="/opt/glo/.venv"
+elif [[ "$_GLO_BIN_DIR" == "/opt/glo/bin" ]]; then
+    VENV_DIR="/opt/glo/.venv"
+    echo "[I] Creating build venv at ${VENV_DIR}" >&2
+    UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
+else
+    VENV_DIR="${WORKSPACE_DIR}/.glo/build"
+    echo "[I] Creating build venv at ${VENV_DIR}" >&2
+    UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
+fi
 PYTHON="${VENV_DIR}/bin/python3"
 
 # Default execution mode: "local" or "docker"
@@ -182,12 +195,6 @@ cleanup() {
 
 # Run the planning phase
 if [[ "$PLAN_MODE" == "local" ]]; then
-    # Create venv if it doesn't exist or Python symlink is broken
-    if [[ ! -x "$PYTHON" ]]; then
-        echo "[I] Creating build venv at ${VENV_DIR}" >&2
-        rm -rf "$VENV_DIR"  # Clean up any broken venv
-        UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
-    fi
     WORKSPACE="$WORKSPACE_DIR" "$PYTHON" -m glo_build.cli --plan-path "$PLAN_PATH" "$@"
     exit_code=$?
 else
@@ -198,13 +205,16 @@ else
 
     docker run "${docker_args[@]}" "${DEV_IMAGE}" \
         bash -c '
-            VENV_DIR="/opt/glo/.venv"
-            PYTHON="${VENV_DIR}/bin/python3"
-            if [[ ! -x "$PYTHON" ]]; then
+            if [[ -x "${CONTAINER_WORKDIR}/.glo/build/bin/python3" ]]; then
+                VENV_DIR="${CONTAINER_WORKDIR}/.glo/build"
+            elif [[ -x "/opt/glo/.venv/bin/python3" ]]; then
+                VENV_DIR="/opt/glo/.venv"
+            else
+                VENV_DIR="/opt/glo/.venv"
                 echo "[I] Creating build venv at ${VENV_DIR}" >&2
-                rm -rf "$VENV_DIR"
                 UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${CONTAINER_WORKDIR}/lib/build" --package glo_build
             fi
+            PYTHON="${VENV_DIR}/bin/python3"
             WORKSPACE="$CONTAINER_WORKDIR" "$PYTHON" -m glo_build.cli --plan-path "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}" "$@"
         ' -- "$@"
     exit_code=$?

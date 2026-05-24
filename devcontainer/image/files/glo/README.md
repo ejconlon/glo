@@ -10,7 +10,7 @@ Run once from your project root (which must contain a `.git` directory):
 glo-bootstrap
 ```
 
-This creates `notes/issue/` for issue tracking and symlinks `lib/` to `/opt/glo/lib`.
+This creates `base/issue/` for issue tracking and symlinks `lib/` to `/opt/glo/lib`.
 
 All scripts resolve the workspace root by walking up from `$PWD` to find the nearest `.git` directory.
 
@@ -21,12 +21,12 @@ All scripts are on `PATH`.
 ### glo-bootstrap
 
 Initializes a workspace. Creates:
-- `notes/issue/` — issue tracker storage
+- `base/issue/` — issue tracker storage
 - `lib/` → `/opt/glo/lib` — symlink to build library
 
 ### glo-issue
 
-Minimal ticket system with dependency tracking. Tickets are stored as Markdown files in `notes/issue/`.
+Minimal ticket system with dependency tracking. Tickets are stored as Markdown files in `base/issue/`.
 
 ```
 glo-issue <command> [args]
@@ -50,7 +50,7 @@ glo-agent precommit          # run build precommit checks
 
 ### glo-build
 
-Lightweight build system backed by the `loupe_build` Python package in `lib/build/`.
+Lightweight build system backed by the `glo_build` Python package in `lib/build/`.
 
 ```
 glo-build [--local|--docker] <target> [args]
@@ -60,4 +60,4 @@ Manages a Python venv at `.venv/build/` in the workspace. Can run builds locally
 
 ## Library (`/opt/glo/lib/`)
 
-Contains the `loupe_build` Python package used by `glo-build`. Symlinked into each workspace as `lib/` by `glo-bootstrap`.
+Contains the `glo_build` Python package used by `glo-build`. Symlinked into each workspace as `lib/` by `glo-bootstrap`.

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # glo-agent - agent-aware issue CLI
-# With AGENT_NAME: routes to notes/agent/$AGENT_NAME/, supports focus
-# Without AGENT_NAME: routes to notes/issue/, focus commands disabled
+# With AGENT_NAME: routes to base/agent/$AGENT_NAME/, supports focus
+# Without AGENT_NAME: routes to base/issue/, focus commands disabled
 
 _find_workspace() {
     local d="$PWD"
@@ -16,11 +16,11 @@ _find_workspace() {
 }
 WORKSPACE_DIR="$(_find_workspace)"
 README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
-[[ -d "${WORKSPACE_DIR}/notes/issue" ]] || { echo "[E] notes/issue not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+[[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
 
-TICKETS_DIR="${WORKSPACE_DIR}/notes/issue"
+TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
 if [[ -n "${AGENT_NAME:-}" ]]; then
-    AGENT_DIR="${WORKSPACE_DIR}/.agent/${AGENT_NAME}"
+    AGENT_DIR="${WORKSPACE_DIR}/.glo/agent/${AGENT_NAME}"
 else
     AGENT_DIR=""
 fi
