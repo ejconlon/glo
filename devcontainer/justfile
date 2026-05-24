@@ -23,7 +23,7 @@ down-all:
 
 # Run a command in the devcontainer
 exec name uniq *args:
-  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}} --env AGENT_NAME={{name}}-{{uniq}} {{args}}
+  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}} --remote-env AGENT_NAME={{name}}-{{uniq}} {{args}}
 
 # Run command lifecycle
 lifecycle name *args:
