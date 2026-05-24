@@ -1,4 +1,5 @@
-workspace := parent_directory(justfile_directory())
+workspace := env_var_or_default("GLO_WORKSPACE", parent_directory(justfile_directory()))
+export GLO_WORKSPACE := workspace
 project := file_name(workspace)
 
 # Build the devcontainer image
