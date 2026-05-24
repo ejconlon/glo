@@ -4,25 +4,11 @@ Developer tools installed in this container.
 
 ## Setup
 
-Run once from your project root (which must contain a `.git` directory):
-
-```
-glo-bootstrap
-```
-
-This creates `base/issue/` for issue tracking and symlinks `lib/` to `/opt/glo/lib`.
-
 All scripts resolve the workspace root by walking up from `$PWD` to find the nearest `.git` directory.
 
 ## Scripts (`/opt/glo/`)
 
 All scripts are on `PATH`.
-
-### glo-bootstrap
-
-Initializes a workspace. Creates:
-- `base/issue/` — issue tracker storage
-- `lib/` → `/opt/glo/lib` — symlink to build library
 
 ### glo-issue
 
@@ -60,4 +46,4 @@ Manages a Python venv at `.venv/build/` in the workspace. Can run builds locally
 
 ## Library (`/opt/glo/lib/`)
 
-Contains the `glo_build` Python package used by `glo-build`. Symlinked into each workspace as `lib/` by `glo-bootstrap`.
+Contains the `glo_build` Python package used by `glo-build`. Symlinked into each workspace as `lib/`.

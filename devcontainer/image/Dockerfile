@@ -295,7 +295,6 @@ RUN mkdir -p /opt/glo/bin /opt/glo/lib
 COPY --chown=user:user files/config/opencode/opencode.json /home/user/.config/opencode/opencode.json
 COPY files/glo/README.md /opt/glo/README.md
 COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
-COPY --chmod=0755 files/glo/bin/glo-bootstrap /opt/glo/bin/glo-bootstrap
 COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build

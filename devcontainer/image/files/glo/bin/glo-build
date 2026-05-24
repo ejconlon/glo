@@ -15,7 +15,7 @@ _find_workspace() {
 WORKSPACE_DIR="$(_find_workspace)"
 _GLO_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 README="${_GLO_BIN_DIR}/../README.md"
-[[ -d "${WORKSPACE_DIR}/lib/build" ]] || { echo "[E] lib/build not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+[[ -d "${WORKSPACE_DIR}/lib/build" ]] || { echo "[E] lib/build not found in $WORKSPACE_DIR" >&2; exit 1; }
 
 if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/python3" ]]; then
     VENV_DIR="${WORKSPACE_DIR}/.glo/build"

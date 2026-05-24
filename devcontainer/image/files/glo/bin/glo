@@ -7,7 +7,7 @@ case "${1:-}" in
     issue)     shift; exec glo-issue "$@" ;;
     agent)     shift; exec glo-agent "$@" ;;
     build)     shift; exec glo-build "$@" ;;
-    bootstrap) shift; exec glo-bootstrap "$@" ;;
+    readme)    cat "$README" ;;
     help|--help|-h)
         cat <<EOF
 glo - developer tools dispatcher
@@ -18,14 +18,12 @@ Commands:
   issue      Ticket system (glo-issue --help)
   agent      Agent-aware issue CLI with focus stack (glo-agent --help)
   build      Lightweight build system (glo-build --help)
-  bootstrap  Initialize workspace (creates base/issue/ and lib/)
-
-See $README for full documentation.
+  readme     Print full documentation
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|bootstrap} [args]" >&2
-        echo "Run 'glo help' or see $README for documentation." >&2
+        echo "Usage: glo {issue|agent|build|readme} [args]" >&2
+        echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;
 esac

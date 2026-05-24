@@ -16,7 +16,7 @@ _find_workspace() {
 }
 WORKSPACE_DIR="$(_find_workspace)"
 README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
-[[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+[[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
 
 TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
 if [[ -n "${AGENT_NAME:-}" ]]; then

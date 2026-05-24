@@ -17,7 +17,7 @@ WORKSPACE_DIR="$(_find_workspace)"
 README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
 
 : "${TICKETS_DIR:=${WORKSPACE_DIR}/base/issue}"
-[[ -d "$TICKETS_DIR" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+[[ -d "$TICKETS_DIR" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
 
 # Prefer ripgrep if available, fall back to grep
 if command -v rg &>/dev/null; then
