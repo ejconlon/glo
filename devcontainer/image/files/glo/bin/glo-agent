@@ -1,0 +1,673 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# glo-agent - agent-aware issue CLI
+# With AGENT_NAME: routes to notes/agent/$AGENT_NAME/, supports focus
+# Without AGENT_NAME: routes to notes/issue/, focus commands disabled
+
+_find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        [[ -d "$d/.git" ]] && { echo "$d"; return 0; }
+        d="$(dirname "$d")"
+    done
+    echo "[E] No .git directory found from $PWD upward" >&2
+    return 1
+}
+WORKSPACE_DIR="$(_find_workspace)"
+README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+[[ -d "${WORKSPACE_DIR}/notes/issue" ]] || { echo "[E] notes/issue not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+
+TICKETS_DIR="${WORKSPACE_DIR}/notes/issue"
+if [[ -n "${AGENT_NAME:-}" ]]; then
+    AGENT_DIR="${WORKSPACE_DIR}/.agent/${AGENT_NAME}"
+else
+    AGENT_DIR=""
+fi
+
+issue() {
+    TICKETS_DIR="${TICKETS_DIR}" glo-issue "$@"
+}
+
+# Resolve a ticket path by exact or partial ID match (mirrors glo-issue logic)
+resolve_ticket() {
+    local id="$1"
+    local exact="${TICKETS_DIR}/${id}.md"
+    if [[ -f "$exact" ]]; then
+        echo "$exact"
+        return 0
+    fi
+    local matches
+    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" 2>/dev/null | head -2)
+    local count
+    count=$(echo "$matches" | grep -c . || true)
+    if [[ "$count" -eq 1 ]]; then
+        echo "$matches"
+        return 0
+    elif [[ "$count" -gt 1 ]]; then
+        echo "Error: ambiguous ID '$id' matches multiple tickets" >&2
+        return 1
+    else
+        echo "Error: ticket '$id' not found" >&2
+        return 1
+    fi
+}
+
+require_agent() {
+    if [[ -z "$AGENT_DIR" ]]; then
+        echo "Error: $1 requires AGENT_NAME to be set" >&2
+        return 1
+    fi
+}
+
+# Get assignee from a ticket file
+ticket_assignee() {
+    sed -n '/^---$/,/^---$/p' "$1" | grep '^assignee:' | sed 's/^assignee: *//'
+}
+
+# Check agent has access (own or unassigned). Returns 0 if ok.
+# Usage: check_access <id> [--force]
+check_access() {
+    [[ -z "${AGENT_NAME:-}" ]] && return 0
+    local id="$1"
+    local force="${2:-}"
+    [[ "$force" == "--force" ]] && return 0
+    local file
+    file=$(resolve_ticket "$id") || return 1
+    local assignee
+    assignee=$(ticket_assignee "$file")
+    if [[ -n "$assignee" && "$assignee" != "$AGENT_NAME" ]]; then
+        echo "Error: issue '$(basename "$file" .md)' is assigned to '$assignee'. Use --force to override." >&2
+        return 1
+    fi
+    return 0
+}
+
+# --- Focus stack ---
+# Stack file: $AGENT_DIR/focus (plain text, one ID per line, newest at bottom)
+
+# Remove entries from the focus stack whose tickets no longer exist.
+clean_focus_stack() {
+    local stack="${AGENT_DIR}/focus"
+    [[ -f "$stack" ]] || return 0
+    [[ -s "$stack" ]] || return 0
+    local tmp="${stack}.tmp.$$"
+    local removed=0
+    : > "$tmp"
+    while IFS= read -r id; do
+        [[ -z "$id" ]] && continue
+        if resolve_ticket "$id" >/dev/null 2>&1; then
+            echo "$id" >> "$tmp"
+        else
+            ((removed++)) || true
+        fi
+    done < "$stack"
+    if [[ "$removed" -gt 0 ]]; then
+        mv "$tmp" "$stack"
+        echo "Cleaned $removed stale entry(s) from focus stack" >&2
+    else
+        rm -f "$tmp"
+    fi
+}
+
+resolve_focus() {
+    if [[ -z "${AGENT_NAME:-}" ]]; then
+        echo "Error: focus requires AGENT_NAME" >&2; return 1
+    fi
+    local stack="${AGENT_DIR}/focus"
+    if [[ ! -s "$stack" ]]; then
+        echo "Error: focus stack is empty" >&2; return 1
+    fi
+    local id
+    id=$(tail -1 "$stack")
+    local file
+    file=$(resolve_ticket "$id") || return 1
+    echo "$file"
+}
+
+cmd_get_focus() {
+    require_agent "focus get" || return 1
+    local target
+    target=$(resolve_focus) || return 1
+    basename "$target" .md
+}
+
+cmd_show_focus() {
+    require_agent "focus show" || return 1
+    local target
+    target=$(resolve_focus) || return 1
+    local ticket_id
+    ticket_id=$(basename "$target" .md)
+    issue show "$ticket_id"
+}
+
+cmd_focus_push() {
+    require_agent "focus push" || return 1
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent focus push <id> [--force]" >&2; return 1
+    fi
+    local id="${args[0]}"
+    check_access "$id" "$force" || return 1
+    local file
+    file=$(resolve_ticket "$id") || return 1
+    local full_id
+    full_id=$(basename "$file" .md)
+    # Start the issue (in_progress + assignee)
+    issue start "$full_id"
+    if [[ -n "${AGENT_NAME:-}" ]]; then
+        issue set-assignee "$full_id" "$AGENT_NAME"
+    fi
+    # Remove from stack if already present, then append
+    local stack="${AGENT_DIR}/focus"
+    if [[ -f "$stack" ]]; then
+        local tmp="${stack}.tmp.$$"
+        grep -v "^${full_id}$" "$stack" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "$stack"
+    fi
+    echo "$full_id" >> "$stack"
+    echo "Pushed $full_id (focus stack depth: $(wc -l < "$stack"))"
+}
+
+cmd_focus_pop() {
+    require_agent "focus pop" || return 1
+    local stack="${AGENT_DIR}/focus"
+    if [[ ! -s "$stack" ]]; then
+        echo "Error: focus stack is empty" >&2; return 1
+    fi
+    local id
+    id=$(tail -1 "$stack")
+    # Remove last line
+    local tmp="${stack}.tmp.$$"
+    head -n -1 "$stack" > "$tmp"
+    mv "$tmp" "$stack"
+    # Pause the popped issue
+    issue status "$id" open
+    local depth
+    depth=$(wc -l < "$stack")
+    echo "Popped $id (focus stack depth: ${depth})"
+}
+
+cmd_focus_list() {
+    require_agent "focus list" || return 1
+    local stack="${AGENT_DIR}/focus"
+    if [[ ! -s "$stack" ]]; then
+        echo "(empty)" ; return 0
+    fi
+    local total
+    total=$(wc -l < "$stack")
+    local pos=$total
+    while IFS= read -r id; do
+        printf "%2d  %s\n" "$pos" "$id"
+        ((pos--))
+    done < "$stack"
+}
+
+cmd_focus_create() {
+    require_agent "focus create" || return 1
+    local id
+    id=$(cmd_create "$@")
+    cmd_focus_push "$id"
+}
+
+cmd_focus_ready() {
+    require_agent "focus ready" || return 1
+    local next
+    next=$(cmd_ready "$@" | head -1)
+    if [[ -z "$next" ]]; then
+        echo "No ready issues" >&2; return 1
+    fi
+    local id="${next%% *}"
+    # Trim whitespace from padded ID
+    id="${id// /}"
+    cmd_focus_push "$id"
+}
+
+cmd_focus() {
+    if [[ -z "${AGENT_NAME:-}" ]]; then
+        echo "Error: focus requires AGENT_NAME" >&2; return 1
+    fi
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: glo-agent focus {push|pop|list|create|ready|get|show|close|add-note|block|link|unlink} [args...]" >&2
+        return 1
+    fi
+    clean_focus_stack
+    local sub="$1"; shift
+    case "$sub" in
+        push)   cmd_focus_push "$@" ;;
+        pop)    cmd_focus_pop "$@" ;;
+        list)   cmd_focus_list "$@" ;;
+        create) cmd_focus_create "$@" ;;
+        ready)  cmd_focus_ready "$@" ;;
+        get)    cmd_get_focus "$@" ;;
+        show)   cmd_show_focus "$@" ;;
+        close|add-note|block|link|unlink)
+            local fid
+            fid=$(cmd_get_focus) || return 1
+            "cmd_${sub//-/_}" "$fid" "$@"
+            ;;
+        *)  echo "Unknown focus subcommand: $sub" >&2; return 1 ;;
+    esac
+}
+
+# --- Issue commands ---
+
+cmd_start() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent issue start <id> [--force]" >&2
+        return 1
+    fi
+    local id="${args[0]}"
+    check_access "$id" "$force" || return 1
+    issue start "$id"
+    if [[ -n "${AGENT_NAME:-}" ]]; then
+        issue set-assignee "$id" "$AGENT_NAME"
+    fi
+}
+
+cmd_close() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent issue close <id> [--force]" >&2
+        return 1
+    fi
+    # Assigned-only check (stricter than check_access)
+    if [[ -n "${AGENT_NAME:-}" && "$force" != "--force" ]]; then
+        local file
+        file=$(resolve_ticket "${args[0]}") || return 1
+        local assignee
+        assignee=$(ticket_assignee "$file")
+        if [[ "$assignee" != "$AGENT_NAME" ]]; then
+            echo "Error: issue '${args[0]}' not assigned to '${AGENT_NAME}'. Use --force to override." >&2
+            return 1
+        fi
+    fi
+    issue close "${args[0]}"
+    # Remove from focus stack if present
+    if [[ -n "$AGENT_DIR" && -f "${AGENT_DIR}/focus" ]]; then
+        local full_id
+        full_id=$(basename "$(resolve_ticket "${args[0]}")" .md)
+        local tmp="${AGENT_DIR}/focus.tmp.$$"
+        grep -v "^${full_id}$" "${AGENT_DIR}/focus" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "${AGENT_DIR}/focus"
+    fi
+}
+
+cmd_pause() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent issue pause <id> [--force]" >&2; return 1
+    fi
+    local id="${args[0]}"
+    if [[ -n "${AGENT_NAME:-}" && "$force" != "--force" ]]; then
+        local file
+        file=$(resolve_ticket "$id") || return 1
+        local assignee
+        assignee=$(ticket_assignee "$file")
+        if [[ "$assignee" != "$AGENT_NAME" ]]; then
+            echo "Error: issue '$id' not assigned to '${AGENT_NAME}'" >&2; return 1
+        fi
+    fi
+    issue status "$id" open
+    # Remove from stack if present
+    if [[ -n "$AGENT_DIR" && -f "${AGENT_DIR}/focus" ]]; then
+        local full_id
+        full_id=$(basename "$(resolve_ticket "$id")" .md)
+        local tmp="${AGENT_DIR}/focus.tmp.$$"
+        grep -v "^${full_id}$" "${AGENT_DIR}/focus" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "${AGENT_DIR}/focus"
+    fi
+}
+
+cmd_lsi() {
+    local now
+    now=$(date -u +%s)
+    awk -v now="$now" '
+    BEGIN { FS=": "; in_front=0 }
+    FNR==1 {
+        if (prev_file) store()
+        id=""; status=""; title=""; priority=""; created=""; assignee=""; desc=""; got_title=0
+        in_front=0; prev_file=FILENAME
+    }
+    /^---$/ { in_front = !in_front; next }
+    in_front && /^id:/ { id = $2 }
+    in_front && /^status:/ { status = $2 }
+    in_front && /^priority:/ { priority = $2 }
+    in_front && /^created:/ { created = $2 }
+    in_front && /^assignee:/ { assignee = $2 }
+    !in_front && /^# / && !got_title { title = substr($0, 3); got_title=1; next }
+    !in_front && got_title && desc == "" && /[^ \t]/ { desc = $0 }
+
+    function store() {
+        if (id == "") return
+        n++
+        ids[n] = id; titles[n] = title; statuses[n] = status
+        priorities[n] = (priority != "") ? priority+0 : 2
+        createds[n] = created; assignees[n] = assignee
+        d = desc; if (length(d) > 50) d = substr(d, 1, 47) "..."
+        descs[n] = d
+        epochs[n] = parse_iso(created)
+        sort_a[n] = (status == "closed") ? 2 : 1
+    }
+
+    function parse_iso(s,    y,m,d,H,M,S) {
+        y = substr(s,1,4); m = substr(s,6,2); d = substr(s,9,2)
+        H = substr(s,12,2); M = substr(s,15,2); S = substr(s,18,2)
+        return mktime(y " " m " " d " " H " " M " " S)
+    }
+
+    function relative(epoch,    d) {
+        d = now - epoch
+        if (d < 0) return "now"
+        if (d < 60) return d "s ago"
+        if (d < 3600) return int(d/60) "m ago"
+        if (d < 86400) return int(d/3600) "h ago"
+        if (d < 604800) return int(d/86400) "d ago"
+        if (d < 2592000) return int(d/604800) "w ago"
+        return int(d/2592000) "mo ago"
+    }
+
+    END {
+        if (prev_file) store()
+        # Insertion sort by (closed_rank asc, priority asc, epoch desc)
+        for (i = 1; i <= n; i++) order[i] = i
+        for (i = 2; i <= n; i++) {
+            tmp = order[i]
+            j = i - 1
+            while (j >= 1 && cmp(order[j], tmp) > 0) {
+                order[j+1] = order[j]; j--
+            }
+            order[j+1] = tmp
+        }
+        printf "%-36s %-12s %-4s %-8s %-10s %s\n", "ID", "STATUS", "PRIO", "CREATED", "ASSIGNEE", "DESC"
+        for (i = 1; i <= n; i++) {
+            k = order[i]
+            printf "%-36s %-12s %-4d %-8s %-10s %s\n", \
+                ids[k], statuses[k], priorities[k], relative(epochs[k]), assignees[k], descs[k]
+        }
+    }
+
+    function cmp(a, b) {
+        if (sort_a[a] != sort_a[b]) return sort_a[a] - sort_a[b]
+        if (priorities[a] != priorities[b]) return priorities[a] - priorities[b]
+        if (epochs[a] != epochs[b]) return epochs[b] - epochs[a]
+        return 0
+    }
+    ' "$TICKETS_DIR"/*.md 2>/dev/null
+}
+
+cmd_ready() {
+    local show_all=false
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all) show_all=true; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ -z "${AGENT_NAME:-}" || "$show_all" == true ]]; then
+        issue ready "${args[@]}"
+        return
+    fi
+    # Filter to assigned-to-self or unassigned
+    issue ready "${args[@]}" | while IFS= read -r line; do
+        local id="${line%% *}"
+        # Trim whitespace from padded ID
+        id="${id// /}"
+        local file="${TICKETS_DIR}/${id}.md"
+        [[ -f "$file" ]] || continue
+        local assignee
+        assignee=$(ticket_assignee "$file")
+        [[ -z "$assignee" || "$assignee" == "$AGENT_NAME" ]] && echo "$line"
+    done
+}
+
+cmd_blocked() {
+    local show_all=false
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all) show_all=true; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ -z "${AGENT_NAME:-}" || "$show_all" == true ]]; then
+        issue blocked "${args[@]}"
+        return
+    fi
+    issue blocked "${args[@]}" | while IFS= read -r line; do
+        local id="${line%% *}"
+        local file="${TICKETS_DIR}/${id}.md"
+        [[ -f "$file" ]] || continue
+        local assignee
+        assignee=$(ticket_assignee "$file")
+        [[ -z "$assignee" || "$assignee" == "$AGENT_NAME" ]] && echo "$line"
+    done
+}
+
+cmd_add_note() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent add-note <id> [text] [--force]" >&2
+        return 1
+    fi
+    check_access "${args[0]}" "$force" || return 1
+    issue add-note "${args[@]}"
+}
+
+cmd_link() {
+    local force=""
+    local ids=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) ids+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#ids[@]} -lt 2 ]]; then
+        echo "Usage: glo-agent link <id> <id> [id...] [--force]" >&2
+        return 1
+    fi
+    for id in "${ids[@]}"; do
+        check_access "$id" "$force" || return 1
+    done
+    issue link "${ids[@]}"
+}
+
+cmd_unlink() {
+    local force=""
+    local ids=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) ids+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#ids[@]} -lt 2 ]]; then
+        echo "Usage: glo-agent unlink <id> <id> [--force]" >&2
+        return 1
+    fi
+    for id in "${ids[@]}"; do
+        check_access "$id" "$force" || return 1
+    done
+    issue unlink "${ids[@]}"
+}
+
+cmd_block() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 2 ]]; then
+        echo "Usage: glo-agent block <id> <blocker-id> [--force]" >&2
+        return 1
+    fi
+    check_access "${args[0]}" "$force" || return 1
+    issue dep "${args[0]}" "${args[1]}"
+}
+
+cmd_assign() {
+    if [[ $# -lt 2 ]]; then
+        echo "Usage: glo-agent issue assign <id> <name>" >&2
+        return 1
+    fi
+    issue set-assignee "$1" "$2"
+}
+
+cmd_unassign() {
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: glo-agent issue unassign <id>" >&2
+        return 1
+    fi
+    issue set-assignee "$1"
+}
+
+cmd_precommit() {
+    glo-build --filter=work precommit
+}
+
+# --- Issue subcommand dispatcher ---
+
+cmd_create() {
+    local _unassigned=false
+    local _create_args=()
+    for _a in "$@"; do
+        case "$_a" in
+            --unassigned) _unassigned=true ;;
+            *) _create_args+=("$_a") ;;
+        esac
+    done
+    if [[ -n "${AGENT_NAME:-}" && "$_unassigned" == false ]]; then
+        issue create --assignee "$AGENT_NAME" "${_create_args[@]}"
+    else
+        issue create "${_create_args[@]}"
+    fi
+}
+
+cmd_issue() {
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: glo-agent issue {list|create|ready|blocked|start|close|pause|show|add-note|block|link|unlink|assign|unassign} [args...]" >&2
+        return 1
+    fi
+    local sub="$1"; shift
+    case "$sub" in
+        list)       cmd_lsi "$@" ;;
+        create)     cmd_create "$@" ;;
+        ready)      cmd_ready "$@" ;;
+        blocked)    cmd_blocked "$@" ;;
+        start)      cmd_start "$@" ;;
+        close)      cmd_close "$@" ;;
+        pause)      cmd_pause "$@" ;;
+        show)       issue show "$@" ;;
+        add-note)   cmd_add_note "$@" ;;
+        block)      cmd_block "$@" ;;
+        link)       cmd_link "$@" ;;
+        unlink)     cmd_unlink "$@" ;;
+        assign)     cmd_assign "$@" ;;
+        unassign)   cmd_unassign "$@" ;;
+        *)  echo "Unknown issue subcommand: $sub" >&2; return 1 ;;
+    esac
+}
+
+cmd_help() {
+    cat <<EOF
+glo-agent - agent-aware issue CLI
+See $README for full documentation.
+
+Usage: glo-agent <command> [args]
+
+Track your current work with focus subcommands:
+  focus push <id> [--force]   Push issue onto focus stack (starts it)
+  focus pop                   Pop top issue (pauses it)
+  focus list                  Show focus stack (1=top/current)
+  focus create [title]        Create issue and push onto stack
+  focus ready                 Push next ready issue onto stack
+  focus get                   Print current focus ID
+  focus show                  Show current focus issue
+  focus <cmd> [args]          Run cmd with focused ID (close, add-note, block, link, unlink)
+
+Manage issues directly with issue subcommands:
+  issue list                     Table of all issues
+  issue create [title] [--unassigned]  Create issue (assignee=self)
+  issue ready [--all]            List ready issues (assigned to you)
+  issue blocked [--all]          List blocked issues (assigned to you)
+  issue start <id> [--force]     Start issue (in_progress + assignee)
+  issue close <id> [--force]     Close issue (assigned-only)
+  issue pause <id> [--force]     Pause issue (open, remove from stack)
+  issue show <id>                Display issue
+  issue add-note <id> [--force]  Append timestamped note
+  issue block <id> <blocker> [--force]  Add dependency
+  issue link <id> <id> [--force]        Link issues
+  issue unlink <id> <id> [--force]      Unlink issues
+  issue assign <id> <name>              Set issue assignee
+  issue unassign <id>                   Clear issue assignee
+
+Build:
+  precommit        Run glo-build --filter=work precommit
+EOF
+}
+
+# --- Main dispatch ---
+
+for _a in "$@"; do [[ "$_a" == "--help" || "$_a" == "-h" ]] && { cmd_help; exit 0; }; done
+
+case "${1:-help}" in
+    focus)
+        shift
+        cmd_focus "$@"
+        ;;
+    issue)
+        shift
+        cmd_issue "$@"
+        ;;
+    precommit)
+        shift
+        cmd_precommit "$@"
+        ;;
+    help|--help|-h) cmd_help ;;
+    *)
+        echo "Unknown command: $1" >&2
+        echo "Run 'glo-agent help' for usage" >&2
+        exit 1
+        ;;
+esac

@@ -1,0 +1,313 @@
+FROM rockylinux/rockylinux:10-minimal
+
+USER root
+WORKDIR /root
+
+RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
+    --mount=type=cache,target=/var/lib/dnf,id=dnf-lib-dev,sharing=locked \
+    microdnf -y install epel-release \
+    && microdnf -y --setopt=install_weak_deps=0 install \
+        bind-utils \
+        bzip2 \
+        ca-certificates \
+        chafa \
+        file \
+        findutils \
+        gcc \
+        gcc-c++ \
+        gh \
+        git \
+        gnupg2 \
+        gzip \
+        htop \
+        iputils \
+        iproute \
+        lsof \
+        make \
+        ncurses \
+        neovim \
+        openssh-clients \
+        pandoc \
+        patch \
+        perf \
+        dnf-plugins-core \
+        net-tools \
+        nmap \
+        nmap-ncat \
+        unzip \
+        inotify-tools \
+        jq \
+        pv \
+        pkgconf-pkg-config \
+        procps-ng \
+        psmisc \
+        python3.12 \
+        python3.12-pip \
+        readline \
+        rsync \
+        ripgrep \
+        shellcheck \
+        sqlite \
+        strace \
+        sudo \
+        tar \
+        tmux \
+        tree \
+        time \
+        wget \
+        whois \
+        which \
+        xz \
+        yq \
+        zip \
+        zstd \
+        libpq-devel \
+        postgresql \
+        postgresql-server \
+        gmp-devel \
+        libffi-devel \
+        zlib-devel
+
+# Upgrade pip and install uv
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir uv
+
+# Install rustup and Rust toolchain from GitHub releases with SHA256 verification
+# We need Rust 1.85.0+ for features required by tantivy 0.25.0
+ARG RUST_ENABLED=1
+ARG RUSTUP_VERSION=1.27.1
+ARG RUSTUP_SHA256_X64=6aeece6993e902708983b209d04c0d1dbb14ebb405ddb87def578d41f920f56d
+ARG RUSTUP_SHA256_ARM64=1cffbf51e63e634c746f741de50649bbbcbd9dbe1de363c9ecef64e278dba2b2
+ARG RUST_VERSION=1.92.0
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN if [ "${RUST_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) rustup_arch="x86_64"; checksum="${RUSTUP_SHA256_X64}" ;; \
+        aarch64) rustup_arch="aarch64"; checksum="${RUSTUP_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    url="https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${rustup_arch}-unknown-linux-gnu/rustup-init"; \
+    curl -fsSLo /tmp/rustup-init "${url}"; \
+    echo "${checksum}  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path; \
+    rm -f /tmp/rustup-init; \
+    chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
+    rustup component add rust-analyzer rust-src; \
+    rustc --version; \
+    cargo --version; \
+    fi
+
+# Install just from GitHub releases.
+ARG JUST_ENABLED=1
+ARG JUST_VERSION=1.43.0
+ARG JUST_SHA256_X86_64=a1bc93654f31669fd964ea3011a5e5e9676b9b6f8adcd762606e5140632ea72d
+ARG JUST_SHA256_AARCH64=4fcd8310081c32742eb984b1fdd0eee2e5d4d0f1be9629318012d42606ec9b3e
+RUN if [ "${JUST_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) target="x86_64-unknown-linux-musl"; checksum="${JUST_SHA256_X86_64}" ;; \
+        aarch64) target="aarch64-unknown-linux-musl"; checksum="${JUST_SHA256_AARCH64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${target}.tar.gz"; \
+    curl -fsSLo /tmp/just.tar.gz "${url}"; \
+    echo "${checksum}  /tmp/just.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/just.tar.gz -C /tmp just; \
+    install -m 0755 /tmp/just /usr/local/bin/just; \
+    rm -f /tmp/just /tmp/just.tar.gz; \
+    just --version; \
+    fi
+
+# Install bat (cat clone with syntax highlighting) from GitHub releases.
+ARG BAT_ENABLED=1
+ARG BAT_VERSION=0.26.0
+ARG BAT_SHA256_X64=26a683b038fbc526c6df4166db693ddc9e431e5bdc285d45ccd6b72f3cff5ffd
+ARG BAT_SHA256_ARM64=6ee11bd8a520c514e230669156d9298f0dd2b5afc788c0952a4b14fcec51eaee
+RUN if [ "${BAT_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) bat_arch="x86_64"; checksum="${BAT_SHA256_X64}" ;; \
+        aarch64) bat_arch="aarch64"; checksum="${BAT_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/bat.tar.gz "https://github.com/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-${bat_arch}-unknown-linux-musl.tar.gz"; \
+    echo "${checksum}  /tmp/bat.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/bat-dist; \
+    tar -xzf /tmp/bat.tar.gz -C /tmp/bat-dist --strip-components=1; \
+    install -m 0755 /tmp/bat-dist/bat /usr/local/bin/bat; \
+    rm -rf /tmp/bat-dist /tmp/bat.tar.gz; \
+    bat --version; \
+    fi
+
+# Install fd (fast find alternative) from GitHub releases.
+ARG FD_ENABLED=1
+ARG FD_VERSION=10.3.0
+ARG FD_SHA256_X64=2b6bfaae8c48f12050813c2ffe1884c61ea26e750d803df9c9114550a314cd14
+ARG FD_SHA256_ARM64=996b9b1366433b211cb3bbedba91c9dbce2431842144d925428ead0adf32020b
+RUN if [ "${FD_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) fd_arch="x86_64"; checksum="${FD_SHA256_X64}" ;; \
+        aarch64) fd_arch="aarch64"; checksum="${FD_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/fd.tar.gz "https://github.com/sharkdp/fd/releases/download/v${FD_VERSION}/fd-v${FD_VERSION}-${fd_arch}-unknown-linux-musl.tar.gz"; \
+    echo "${checksum}  /tmp/fd.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/fd-dist; \
+    tar -xzf /tmp/fd.tar.gz -C /tmp/fd-dist --strip-components=1; \
+    install -m 0755 /tmp/fd-dist/fd /usr/local/bin/fd; \
+    rm -rf /tmp/fd-dist /tmp/fd.tar.gz; \
+    fd --version; \
+    fi
+
+# Install zk (Zettelkasten note-taking assistant) from GitHub releases.
+ARG ZK_ENABLED=1
+ARG ZK_VERSION=0.15.1
+ARG ZK_SHA256_X64=6d652bba16faccd169469ceddf3b1e1dd8f3b2af72de218b0f9921809139c0b4
+ARG ZK_SHA256_ARM64=19460e19e3389220015aa98ca849449d9c739ffd6f45c1935b0cd2d149424ce5
+RUN if [ "${ZK_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) zk_arch="amd64"; checksum="${ZK_SHA256_X64}" ;; \
+        aarch64) zk_arch="arm64"; checksum="${ZK_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/zk.tar.gz "https://github.com/zk-org/zk/releases/download/v${ZK_VERSION}/zk-v${ZK_VERSION}-linux-${zk_arch}.tar.gz"; \
+    echo "${checksum}  /tmp/zk.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/zk.tar.gz -C /tmp; \
+    install -m 0755 /tmp/zk /usr/local/bin/zk; \
+    rm -f /tmp/zk /tmp/zk.tar.gz; \
+    zk --version; \
+    fi
+
+# Install Node.js from official upstream binaries.
+# RHEL's packaged Node.js has a V8 bug causing SIGSEGV in interactive TUI apps
+# (e.g. gemini-cli Ink rendering). Upstream binaries don't have this issue.
+ARG NODE_VERSION=22.22.0
+ARG NODE_SHA256_X64=9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+ARG NODE_SHA256_ARM64=1bf1eb9ee63ffc4e5d324c0b9b62cf4a289f44332dfef9607cea1a0d9596ba6f
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64)  node_arch="x64";   checksum="${NODE_SHA256_X64}" ;; \
+        aarch64) node_arch="arm64"; checksum="${NODE_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
+    echo "${checksum}  /tmp/node.tar.xz" | sha256sum -c -; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+    rm -f /tmp/node.tar.xz; \
+    node --version; \
+    npm --version
+
+# Install ghcup and Haskell toolchain (ghc, cabal, stack, hls, ormolu, hlint)
+# To update ghcup: change GHCUP_VERSION, then get SHA256s from:
+#   https://downloads.haskell.org/~ghcup/<version>/SHA256SUMS
+ARG HASKELL_ENABLED=1
+ARG GHCUP_VERSION=0.2.2.0
+ARG GHCUP_SHA256_X64=29c7ed853a0525e6d787697ebb12b0a76f2ab0c5aca3e0b23e5ba75279ddd19d
+ARG GHCUP_SHA256_ARM64=67d50a72e33454d566c9e40db2d64b289ce3deaaee781633dc4a25e4a696a319
+ARG GHC_VERSION=9.12.4
+ARG CABAL_VERSION=3.16.1.0
+ARG STACK_VERSION=3.9.3
+ARG HLS_VERSION=2.14.0.0
+ENV GHCUP_INSTALL_BASE_PREFIX=/usr/local
+RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
+    set -eux; \
+    mkdir -p /usr/local/.ghcup/bin; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) ghcup_arch="x86_64"; checksum="${GHCUP_SHA256_X64}" ;; \
+        aarch64) ghcup_arch="aarch64"; checksum="${GHCUP_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/ghcup "https://downloads.haskell.org/~ghcup/${GHCUP_VERSION}/${ghcup_arch}-linux-ghcup-${GHCUP_VERSION}"; \
+    echo "${checksum}  /tmp/ghcup" | sha256sum -c -; \
+    install -m 0755 /tmp/ghcup /usr/local/.ghcup/bin/ghcup; \
+    rm -f /tmp/ghcup; \
+    export PATH="/usr/local/.ghcup/bin:${PATH}"; \
+    ghcup install ghc "${GHC_VERSION}" --set; \
+    ghcup install cabal "${CABAL_VERSION}" --set; \
+    ghcup install stack "${STACK_VERSION}" --set; \
+    ghcup install hls "${HLS_VERSION}" --set; \
+    ghcup config add-release-channel 3rdparty; \
+    ghcup install ormolu; \
+    ghcup install hlint; \
+    fi
+
+# Setup home
+RUN groupadd --gid 1000 user \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
+    && chown -R user:user /home/user \
+    && install -d -o user -g user \
+      /home/user/.local/bin /home/user/.cache /home/user/.config \
+      /home/user/.claude /home/user/.codex /home/user/.gemini \
+      /home/user/.config/opencode
+
+# Install Claude CLI from official releases
+# To update Claude Code: change CLAUDE_VERSION, then run:
+#   gcs_bucket="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
+#   curl -fsSL "$gcs_bucket/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
+#   curl -fsSL "$gcs_bucket/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
+ARG CLAUDE_ENABLED=1
+ARG CLAUDE_VERSION=2.1.147
+ARG CLAUDE_SHA256_X64=d3e134bf504d6ff7db68d0a6f2206c9a15a6d2f94053845116f3303b0a0d79d4
+ARG CLAUDE_SHA256_ARM64=c7b5b050f9a4cebdc1b369935d3f64078b587b869ae8789c06c437c559d6bb2b
+RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) claude_arch="x64"; checksum="${CLAUDE_SHA256_X64}" ;; \
+        aarch64) claude_arch="arm64"; checksum="${CLAUDE_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    gcs_bucket="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"; \
+    platform="linux-${claude_arch}"; \
+    url="$gcs_bucket/${CLAUDE_VERSION}/$platform/claude"; \
+    binary_path="/tmp/claude"; \
+    curl -fsSL -o "$binary_path" "$url"; \
+    echo "$checksum  $binary_path" | sha256sum -c -; \
+    install -d -o user -g user /home/user/.local /home/user/.local/bin; \
+    install -m 0755 -o user -g user "$binary_path" /home/user/.local/bin/claude; \
+    rm -rf "$binary_path"; \
+    fi
+
+# Install other coding assistants
+ARG AGENTS_ENABLED=1
+RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
+    npm install -g \
+      @openai/codex@0.133.0 \
+      @google/gemini-cli@0.42.0 \
+      opencode-ai@1.15.7; \
+    fi
+
+# Install glo
+RUN mkdir -p /opt/glo/bin /opt/glo/lib
+COPY --chown=user:user files/config/opencode/opencode.json /home/user/.config/opencode/opencode.json
+COPY files/glo/README.md /opt/glo/README.md
+COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
+COPY --chmod=0755 files/glo/bin/glo-bootstrap /opt/glo/bin/glo-bootstrap
+COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent
+COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
+COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
+COPY files/glo/lib/ /opt/glo/lib/
+RUN UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
+    uv sync --project /opt/glo/lib/build --package glo_build --frozen
+
+USER user
+WORKDIR /home/user
+
+ENV UV_SYSTEM_PYTHON=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PATH="/home/user/.local/bin:/opt/glo/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
+
+CMD ["/bin/bash"]

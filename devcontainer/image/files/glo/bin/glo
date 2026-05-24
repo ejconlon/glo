@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+
+case "${1:-}" in
+    issue)     shift; exec glo-issue "$@" ;;
+    agent)     shift; exec glo-agent "$@" ;;
+    build)     shift; exec glo-build "$@" ;;
+    bootstrap) shift; exec glo-bootstrap "$@" ;;
+    help|--help|-h)
+        cat <<EOF
+glo - developer tools dispatcher
+
+Usage: glo <command> [args]
+
+Commands:
+  issue      Ticket system (glo-issue --help)
+  agent      Agent-aware issue CLI with focus stack (glo-agent --help)
+  build      Lightweight build system (glo-build --help)
+  bootstrap  Initialize workspace (creates notes/issue/ and lib/)
+
+See $README for full documentation.
+EOF
+        ;;
+    *)
+        echo "Usage: glo {issue|agent|build|bootstrap} [args]" >&2
+        echo "Run 'glo help' or see $README for documentation." >&2
+        exit 1
+        ;;
+esac

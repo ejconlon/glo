@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+_find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        [[ -d "$d/.git" ]] && { echo "$d"; return 0; }
+        d="$(dirname "$d")"
+    done
+    echo "[E] No .git directory found from $PWD upward" >&2
+    return 1
+}
+WORKSPACE_DIR="$(_find_workspace)"
+README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+
+echo "[I] Bootstrapping workspace at $WORKSPACE_DIR"
+
+mkdir -p "${WORKSPACE_DIR}/notes/issue"
+echo "[I] Created notes/issue/"
+
+if [[ ! -e "${WORKSPACE_DIR}/lib" ]]; then
+    ln -s /opt/glo/lib "${WORKSPACE_DIR}/lib"
+    echo "[I] Created lib/ -> /opt/glo/lib"
+else
+    echo "[I] lib/ already exists, skipping"
+fi
+
+echo "[I] Done. See $README for usage."

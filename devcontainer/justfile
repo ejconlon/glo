@@ -1,0 +1,52 @@
+workspace := parent_directory(justfile_directory())
+project := file_name(workspace)
+
+# Build the devcontainer image
+build:
+  devcontainer build --label devcontainer.project={{project}} --workspace-folder {{workspace}}
+
+# Start the devcontainer (run in background)
+up name uniq:
+  devcontainer up --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}}
+
+# Remove the devcontainer
+down uniq:
+  docker rm -f $(docker ps -aq --filter label=devcontainer.project={{project}} --filter label=devcontainer.uniq={{uniq}}) 2>/dev/null || true
+
+# Show all running devcontainers for this project
+ps:
+  docker ps --filter label=devcontainer.project={{project}} --format 'table {{{{.ID}}\t{{{{.Names}}\t{{{{.Label "devcontainer.name"}}\t{{{{.Label "devcontainer.uniq"}}\t{{{{.Command}}'
+
+# Stop all devcontainers for this project
+down-all:
+  docker rm -f $(docker ps -aq --filter label=devcontainer.project={{project}}) 2>/dev/null || true
+
+# Run a command in the devcontainer
+exec name uniq *args:
+  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}} --env AGENT_NAME={{name}}-{{uniq}} {{args}}
+
+# Run command lifecycle
+lifecycle name *args:
+  #!/bin/bash
+  uniq=$(printf '%04x%04x' $RANDOM $RANDOM)
+  (just up {{name}} "$uniq" && just exec {{name}} "$uniq" {{args}}); just down "$uniq"
+
+# Run claude
+claude:
+  just lifecycle claude claude --dangerously-skip-permissions
+
+# Run codex
+codex:
+  just lifecycle codex codex --dangerously-bypass-approvals-and-sandbox
+
+# Run gemini
+gemini:
+  just lifecycle gemini gemini --yolo
+
+# Run opencode
+opencode:
+  just lifecycle opencode opencode
+
+# Run shell
+shell:
+ just lifecycle shell bash

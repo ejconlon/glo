@@ -1,0 +1,18 @@
+{
+  "name": "datatone",
+  "build": {
+    "dockerfile": "image/Dockerfile",
+    "context": "image"
+  },
+  "remoteUser": "user",
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/user/.claude",
+    "CODEX_HOME": "/home/user/.codex"
+  },
+  "mounts": [
+    "source=claude-home-0,target=/home/user/.claude,type=volume",
+    "source=codex-home-0,target=/home/user/.codex,type=volume",
+    "source=gemini-home-0,target=/home/user/.gemini,type=volume",
+    "source=opencode-home-0,target=/home/user/.local/share/opencode,type=volume"
+  ]
+}

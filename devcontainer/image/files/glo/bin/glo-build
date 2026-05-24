@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# Lightweight build system for the Loupe monorepo.
+# See lib/build/glo_build/cli.py for the implementation.
+set -euo pipefail
+
+_find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        [[ -d "$d/.git" ]] && { echo "$d"; return 0; }
+        d="$(dirname "$d")"
+    done
+    echo "[E] No .git directory found from $PWD upward" >&2
+    return 1
+}
+WORKSPACE_DIR="$(_find_workspace)"
+README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
+[[ -d "${WORKSPACE_DIR}/lib/build" ]] || { echo "[E] lib/build not found in $WORKSPACE_DIR — run glo-bootstrap first" >&2; exit 1; }
+
+VENV_DIR="/opt/glo/.venv"
+PYTHON="${VENV_DIR}/bin/python3"
+
+# Default execution mode: "local" or "docker"
+# Change this to "docker" to run builds in containers by default
+DEFAULT_MODE="local"
+
+# Docker configuration
+DEV_IMAGE="${DEV_IMAGE:-loupe_dev}"
+CONTAINER_USER="loupe"
+CONTAINER_HOME="/home/${CONTAINER_USER}"
+CONTAINER_WORKDIR="${CONTAINER_HOME}/workspace"
+# HOST_WORKDIR is the path on the docker host that maps to SCRIPT_DIR
+# Required for docker-in-docker scenarios
+HOST_WORKDIR="${HOST_WORKDIR:-${WORKSPACE_DIR}}"
+
+# Detect if we're already inside a container
+IN_CONTAINER="false"
+if [[ -f /.dockerenv ]] || [[ -f /run/.containerenv ]]; then
+    IN_CONTAINER="true"
+fi
+
+# Execution mode flags (empty = use default)
+PLAN_MODE=""
+EXEC_MODE=""
+
+for _a in "$@"; do
+    if [[ "$_a" == "--help" || "$_a" == "-h" ]]; then
+        echo "glo-build - lightweight build system. See $README for full documentation."
+        break
+    fi
+done
+
+# Parse execution mode flags (must come first)
+while (($# > 0)); do
+    case "$1" in
+        --local)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "local" ]]; then
+                echo "[E] Conflicting flags: --local cannot be combined with --plan-docker" >&2
+                exit 1
+            fi
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "local" ]]; then
+                echo "[E] Conflicting flags: --local cannot be combined with --exec-docker" >&2
+                exit 1
+            fi
+            PLAN_MODE="local"
+            EXEC_MODE="local"
+            shift
+            ;;
+        --docker)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "docker" ]]; then
+                echo "[E] Conflicting flags: --docker cannot be combined with --plan-local" >&2
+                exit 1
+            fi
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "docker" ]]; then
+                echo "[E] Conflicting flags: --docker cannot be combined with --exec-local" >&2
+                exit 1
+            fi
+            PLAN_MODE="docker"
+            EXEC_MODE="docker"
+            shift
+            ;;
+        --plan-local)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "local" ]]; then
+                echo "[E] Conflicting flags: --plan-local cannot be combined with --plan-docker or --docker" >&2
+                exit 1
+            fi
+            PLAN_MODE="local"
+            shift
+            ;;
+        --plan-docker)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "docker" ]]; then
+                echo "[E] Conflicting flags: --plan-docker cannot be combined with --plan-local or --local" >&2
+                exit 1
+            fi
+            PLAN_MODE="docker"
+            shift
+            ;;
+        --exec-local)
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "local" ]]; then
+                echo "[E] Conflicting flags: --exec-local cannot be combined with --exec-docker or --docker" >&2
+                exit 1
+            fi
+            EXEC_MODE="local"
+            shift
+            ;;
+        --exec-docker)
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "docker" ]]; then
+                echo "[E] Conflicting flags: --exec-docker cannot be combined with --exec-local or --local" >&2
+                exit 1
+            fi
+            EXEC_MODE="docker"
+            shift
+            ;;
+        *)
+            # Stop parsing mode flags, rest goes to loupe_build
+            break
+            ;;
+    esac
+done
+
+# Apply defaults
+PLAN_MODE="${PLAN_MODE:-${DEFAULT_MODE}}"
+EXEC_MODE="${EXEC_MODE:-${DEFAULT_MODE}}"
+
+# Force local mode when inside a container
+if [[ "$IN_CONTAINER" == "true" ]]; then
+    if [[ "$PLAN_MODE" == "docker" || "$EXEC_MODE" == "docker" ]]; then
+        echo "[I] Already inside container, using local mode" >&2
+        PLAN_MODE="local"
+        EXEC_MODE="local"
+    fi
+fi
+
+# Compute volume name hash (matches devrun.sh)
+WORKDIR_HASH="$(printf '%s' "${HOST_WORKDIR}" | sha256sum | cut -c1-12)"
+VENV_VOLUME="loupe-venvs-${WORKDIR_HASH}"
+
+# Detect host timezone for container sync
+HOST_TZ="${TZ:-}"
+if [[ -z "${HOST_TZ}" && -f /etc/timezone ]]; then
+    HOST_TZ="$(cat /etc/timezone)"
+elif [[ -z "${HOST_TZ}" && -L /etc/localtime ]]; then
+    HOST_TZ="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
+fi
+
+# Build common docker arguments for volume mounts
+build_docker_args() {
+    local -n args_ref="$1"
+
+    # Workspace mount
+    args_ref+=(-v "${HOST_WORKDIR}:${CONTAINER_WORKDIR}")
+
+    # Overlay .cache from SCRIPT_DIR so plan files are visible in the container
+    # (needed when HOST_WORKDIR differs from SCRIPT_DIR, e.g. agent builds)
+    if [[ "${HOST_WORKDIR}" != "${WORKSPACE_DIR}" ]]; then
+        args_ref+=(-v "${WORKSPACE_DIR}/.cache:${CONTAINER_WORKDIR}/.cache")
+    fi
+
+    # Venv volume (shared with devrun.sh)
+    args_ref+=(-v "${VENV_VOLUME}:${CONTAINER_WORKDIR}/.venv")
+
+    # Cache directories inside .venv to enable hardlinks
+    args_ref+=(-e "UV_CACHE_DIR=${CONTAINER_WORKDIR}/.venv/cache/uv")
+    args_ref+=(-e "PIP_CACHE_DIR=${CONTAINER_WORKDIR}/.venv/cache/pip")
+
+    # Standard environment
+    args_ref+=(-e "HOME=${CONTAINER_HOME}")
+    args_ref+=(-e "USER=${CONTAINER_USER}")
+    args_ref+=(-e "UV_SYSTEM_PYTHON=1")
+
+    # Timezone (synced with host)
+    [[ -n "${HOST_TZ}" ]] && args_ref+=(-e "TZ=${HOST_TZ}")
+}
+
+# Create temp file for the build plan (in workspace so docker can access it)
+PLAN_NAME="loupe-build.$$.sh"
+PLAN_PATH="${WORKSPACE_DIR}/.cache/${PLAN_NAME}"
+mkdir -p "${WORKSPACE_DIR}/.cache"
+
+cleanup() {
+    rm -f "$PLAN_PATH"
+}
+
+# Run the planning phase
+if [[ "$PLAN_MODE" == "local" ]]; then
+    # Create venv if it doesn't exist or Python symlink is broken
+    if [[ ! -x "$PYTHON" ]]; then
+        echo "[I] Creating build venv at ${VENV_DIR}" >&2
+        rm -rf "$VENV_DIR"  # Clean up any broken venv
+        UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${WORKSPACE_DIR}/lib/build" --package glo_build
+    fi
+    WORKSPACE="$WORKSPACE_DIR" "$PYTHON" -m glo_build.cli --plan-path "$PLAN_PATH" "$@"
+    exit_code=$?
+else
+    # Run planning in docker
+    docker_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
+    build_docker_args docker_args
+    docker_args+=(-e "CONTAINER_WORKDIR=${CONTAINER_WORKDIR}" -e "PLAN_NAME=${PLAN_NAME}")
+
+    docker run "${docker_args[@]}" "${DEV_IMAGE}" \
+        bash -c '
+            VENV_DIR="/opt/glo/.venv"
+            PYTHON="${VENV_DIR}/bin/python3"
+            if [[ ! -x "$PYTHON" ]]; then
+                echo "[I] Creating build venv at ${VENV_DIR}" >&2
+                rm -rf "$VENV_DIR"
+                UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project "${CONTAINER_WORKDIR}/lib/build" --package glo_build
+            fi
+            WORKSPACE="$CONTAINER_WORKDIR" "$PYTHON" -m glo_build.cli --plan-path "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}" "$@"
+        ' -- "$@"
+    exit_code=$?
+fi
+
+# If planning exited non-zero, clean up and propagate the exit code
+if [[ $exit_code -ne 0 ]]; then
+    cleanup
+    exit $exit_code
+fi
+
+# If a plan was written, execute it
+if [[ -s "$PLAN_PATH" ]]; then
+    if [[ "$EXEC_MODE" == "local" ]]; then
+        bash "$PLAN_PATH"
+        exit_code=$?
+    else
+        # Execute plan in docker
+        docker_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
+        build_docker_args docker_args
+
+        docker_args+=(-e "WORKSPACE=${CONTAINER_WORKDIR}")
+        docker run "${docker_args[@]}" "${DEV_IMAGE}" \
+            bash "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}"
+        exit_code=$?
+    fi
+
+    # Clean up on success
+    if [[ $exit_code -eq 0 ]]; then
+        cleanup
+    else
+        echo "[W] Build failed. Plan script preserved at: $PLAN_PATH" >&2
+    fi
+    exit $exit_code
+else
+    # No plan written (help, dryrun, etc.) - clean up empty file
+    cleanup
+fi
