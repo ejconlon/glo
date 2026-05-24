@@ -38,15 +38,27 @@ else
     echo "[I] .glo/build venv already exists, skipping"
 fi
 
-# Symlink glo scripts into bin/
+# Create glo wrappers in bin/. Symlinks to the host checkout are dangling inside
+# the devcontainer, where the image-provided tools live under /opt/glo/bin.
 mkdir -p "${WORKSPACE_DIR}/bin"
 for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*; do
     name="$(basename "$script")"
     dest="${WORKSPACE_DIR}/bin/${name}"
-    if [[ ! -e "$dest" ]]; then
+    if [[ ! -e "$dest" || -L "$dest" ]] || grep -q "exec /opt/glo/bin/${name}" "$dest" 2>/dev/null; then
         rel="$(realpath --relative-to="${WORKSPACE_DIR}/bin" "$script")"
-        ln -sf "$rel" "$dest"
-        echo "[I] Created bin/${name} -> $rel"
+        [[ -L "$dest" ]] && rm -f "$dest"
+        cat > "$dest" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x /opt/glo/bin/${name} ]]; then
+    exec /opt/glo/bin/${name} "\$@"
+fi
+
+exec "\$(realpath "\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/${rel}")" "\$@"
+EOF
+        chmod +x "$dest"
+        echo "[I] Created bin/${name} wrapper"
     else
         echo "[I] bin/${name} already exists, skipping"
     fi

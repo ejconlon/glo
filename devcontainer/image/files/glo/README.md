@@ -4,7 +4,21 @@ Developer tools installed in this container.
 
 ## Setup
 
-All scripts resolve the workspace root by walking up from `$PWD` to find the nearest `.git` directory.
+Run `bootstrap.sh` from the root of a git workspace. It creates:
+
+- `.devcontainer/devcontainer.json`
+- `.devcontainer/image`, a relative symlink to the glo devcontainer image directory
+- `.glo/build`, the host-side `glo_build` venv
+- `bin/glo*`, wrapper scripts that use `/opt/glo/bin` in the container and the checkout copy on the host
+- `base/issue/`, `base/wiki/`, and `base/.zk/`
+- `lib/build`, a relative symlink to the `glo_build` source package
+- `justfile`, with `shell` and `precommit` recipes
+
+After bootstrapping, run `just shell` from the workspace root to start an interactive devcontainer shell. The generated workspace `justfile` passes the workspace path to `devcontainer/justfile`; nested `just` calls preserve that path through `GLO_WORKSPACE`.
+
+The whole `/opt/glo/lib` directory is not symlinked into workspaces. Only `lib/build` is linked, because `glo-build` needs the `glo_build` Python package source.
+
+Most scripts resolve the workspace root by walking up from `$PWD` to find the nearest `.git` directory.
 
 ## Scripts (`/opt/glo/bin/`)
 
@@ -53,8 +67,8 @@ Focus state is stored in `.glo/agent/$AGENT_NAME/focus` — a plain text stack o
 
 ```
 glo-agent focus push <id>     # push ticket onto stack (marks in_progress, assigns to self)
-glo-agent focus pop           # pop top ticket (marks open, removes assignment)
-glo-agent focus list          # show focus stack, top first
+glo-agent focus pop           # pop top ticket and marks it open
+glo-agent focus list          # show focus stack
 glo-agent focus get           # print current focus ID
 glo-agent focus show          # display current focus ticket
 glo-agent focus create [title]  # create ticket and push it
@@ -142,11 +156,11 @@ Projects are discovered by finding `build.json` files under `lib/`. Each `build.
 
 | language | tools | venv isolation |
 |----------|-------|----------------|
-| `py` | uv, ruff, mypy, pytest | `.venv/<name>/` via `UV_PROJECT_ENVIRONMENT` |
-| `ps` | spago, purs, purs-tidy | `.venv/<name>/node_modules` via `PS_NODE_MODULES` |
-| `hs` | cabal, fourmolu, hlint | `.venv/<name>/cabal`, `.venv/<name>/dist-newstyle` |
-| `rs` | cargo, rustfmt, clippy | `.venv/<name>/target` via `CARGO_TARGET_DIR` |
-| `ts` | npm, tsc, eslint, prettier, jest | `.venv/<name>/node_modules` via `TS_NODE_MODULES` |
+| `py` | uv, ruff, mypy, pytest | `.glo/venv/<name>/` via `UV_PROJECT_ENVIRONMENT` |
+| `ps` | spago, purs, purs-tidy | `.glo/venv/<name>/node_modules` via `PS_NODE_MODULES` |
+| `hs` | cabal, fourmolu, hlint | `.glo/venv/<name>/cabal`, `.glo/venv/<name>/dist-newstyle` |
+| `rs` | cargo, rustfmt, clippy | `.glo/venv/<name>/target` via `CARGO_TARGET_DIR` |
+| `ts` | npm, tsc, eslint, prettier, jest | `.glo/venv/<name>/node_modules` via `TS_NODE_MODULES` |
 | `meta` | custom targets only | — |
 
 **Common commands** (run on all projects or a selection):
@@ -176,6 +190,6 @@ glo-build /py ^/py/core format   # all Python except /lib/core
 glo-build precommit ^test        # precommit without test subtargets
 ```
 
-## Library (`/opt/glo/lib/`)
+## Library Source
 
-Contains the `glo_build` Python package used by `glo-build`. Symlinked into each workspace as `lib/`.
+The image contains the packaged glo tooling under `/opt/glo/`. In a bootstrapped workspace, `lib/build` is a relative symlink to the `glo_build` source package from the glo checkout. The rest of `/opt/glo/lib` is not linked into the workspace.
