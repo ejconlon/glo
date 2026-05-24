@@ -324,7 +324,7 @@ class Script:
         # This is called after VIRTUAL_ENV is set, so use that variable
         if "/bin/" in path_str or path_str.endswith("/bin"):
             # Try to use ${VIRTUAL_ENV} for paths in venv
-            parts = path_str.split("/.venv/")
+            parts = path_str.split("/.glo/venv/")
             if len(parts) == 2:
                 subparts = parts[1].split("/", 1)
                 if len(subparts) == 2:
@@ -766,7 +766,7 @@ class Project:
     @property
     def venv_path(self) -> Path:
         """Get path to the virtual environment."""
-        return self.workspace_root / ".venv" / self.venv_name
+        return self.workspace_root / ".glo" / "venv" / self.venv_name
 
     @property
     def python(self) -> Path:
@@ -1031,7 +1031,7 @@ def cmd_venv_py(script: Script, project: Project, args: list[str]) -> None:
     # Install Playwright Firefox browser if playwright is in any dependency group
     script.raw(
         "if grep -q 'playwright' pyproject.toml 2>/dev/null; then "
-        f'XDG_CACHE_HOME="${{WORKSPACE}}/.venv/cache" {shquote(str(venv))}/bin/playwright install firefox; '
+        f'XDG_CACHE_HOME="${{WORKSPACE}}/.glo/venv/cache" {shquote(str(venv))}/bin/playwright install firefox; '
         "fi"
     )
     script.popd()
@@ -1446,7 +1446,7 @@ def cmd_venv_ps(script: Script, project: Project, args: list[str]) -> None:
     # Use $PS_NODE_MODULES/.bin/playwright directly since npx doesn't respect NODE_PATH
     script.raw("if grep -q '\"playwright\"' package.json 2>/dev/null; then")
     script.raw(
-        '  echo "+ XDG_CACHE_HOME=${WORKSPACE}/.venv/cache $PS_NODE_MODULES/.bin/playwright install firefox"'
+        '  echo "+ XDG_CACHE_HOME=${WORKSPACE}/.glo/venv/cache $PS_NODE_MODULES/.bin/playwright install firefox"'
     )
     script.raw(
         '  XDG_CACHE_HOME="${WORKSPACE}/.venv/cache" $PS_NODE_MODULES/.bin/playwright install firefox'
@@ -1622,15 +1622,16 @@ def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> Non
     dirs = ["src"]
     if (project.abs_path / "test").exists():
         dirs.append("test")
-    script.run(
-        [
-            "fourmolu",
-            "--config=${WORKSPACE}/config/hs/fourmolu.yaml",
-            "--mode",
-            "inplace",
-            *dirs,
-        ]
+    script.raw(
+        '_FOURMOLU_CONF="${WORKSPACE}/config/hs/fourmolu.yaml"'
     )
+    script.raw(
+        '[ -f "$_FOURMOLU_CONF" ]'
+        ' && _FOURMOLU_ARGS="--config=$_FOURMOLU_CONF"'
+        " || _FOURMOLU_ARGS="
+    )
+    dir_str = " ".join(dirs)
+    script.raw(f"fourmolu $_FOURMOLU_ARGS --mode inplace {dir_str}")
 
 
 @command("typecheck", "Typecheck code", lang=Lang.Haskell)
@@ -1706,9 +1707,16 @@ def cmd_lint_haskell(script: Script, project: Project, args: list[str]) -> None:
     dirs = ["src"]
     if (project.abs_path / "test").exists():
         dirs.append("test")
-    hint = "--hint=${WORKSPACE}/config/hs/hlint.yaml"
     dir_args = " ".join(dirs)
-    script.raw(f"hlint {hint} {dir_args}")
+    script.raw(
+        '_HLINT_CONF="${WORKSPACE}/config/hs/hlint.yaml"'
+    )
+    script.raw(
+        '[ -f "$_HLINT_CONF" ]'
+        ' && _HLINT_ARGS="--hint=$_HLINT_CONF"'
+        " || _HLINT_ARGS="
+    )
+    script.raw(f"hlint $_HLINT_ARGS {dir_args}")
     # NOTE: apply-refact is really flaky, so this didn't work so well:
     # script.raw(f"hlint {hint} {dir_args} | tee /tmp/hlint-out.txt || true")
     # script.raw(

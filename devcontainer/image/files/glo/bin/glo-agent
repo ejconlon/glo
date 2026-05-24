@@ -21,6 +21,7 @@ README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
 TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
 if [[ -n "${AGENT_NAME:-}" ]]; then
     AGENT_DIR="${WORKSPACE_DIR}/.glo/agent/${AGENT_NAME}"
+    mkdir -p "$AGENT_DIR"
 else
     AGENT_DIR=""
 fi

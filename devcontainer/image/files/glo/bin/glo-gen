@@ -11,7 +11,7 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-_GLO_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEMPLATES_DIR="${_GLO_BIN_DIR}/../templates"
 
 if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/cookiecutter" ]]; then
