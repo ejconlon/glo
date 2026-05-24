@@ -7,6 +7,7 @@ case "${1:-}" in
     issue)     shift; exec glo-issue "$@" ;;
     agent)     shift; exec glo-agent "$@" ;;
     build)     shift; exec glo-build "$@" ;;
+    gen)       shift; exec glo-gen "$@" ;;
     readme)    cat "$README" ;;
     help|--help|-h)
         cat <<EOF
@@ -18,11 +19,12 @@ Commands:
   issue      Ticket system (glo-issue --help)
   agent      Agent-aware issue CLI with focus stack (glo-agent --help)
   build      Lightweight build system (glo-build --help)
+  gen        Generate a lib component from a template (glo-gen --help)
   readme     Print full documentation
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|gen|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

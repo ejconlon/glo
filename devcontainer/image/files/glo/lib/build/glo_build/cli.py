@@ -151,6 +151,8 @@ class Lang(Enum):
     Purescript = auto()
     Meta = auto()
     Haskell = auto()
+    Rust = auto()
+    TypeScript = auto()
 
 
 class TaskStatus(Enum):
@@ -664,6 +666,10 @@ class BuildConfig:
             return Lang.Meta
         elif self.language_str == "hs":
             return Lang.Haskell
+        elif self.language_str == "rs":
+            return Lang.Rust
+        elif self.language_str == "ts":
+            return Lang.TypeScript
         raise ValueError(f"Unknown language: {self.language_str}")
 
 
@@ -684,7 +690,7 @@ def read_build_json(project_path: Path, rel_path: str) -> BuildConfig | None:
     language_str = data.get("language")
     if language_str is None:
         raise ValueError(f"Missing 'language' field in {build_json}")
-    if language_str not in ("py", "ps", "meta", "hs"):
+    if language_str not in ("py", "ps", "meta", "hs", "rs", "ts"):
         raise ValueError(f"Invalid language '{language_str}' in {build_json}")
 
     # Parse targets if present
@@ -906,6 +912,29 @@ class Project:
             )
         else:
             script.run(["cabal"] + args)
+
+    def emit_rs_env(self, script: Script) -> None:
+        """Emit Rust environment setup, routing build artifacts into the venv."""
+        rs_venv = script.workspace_path(self.venv_path)
+        script.export("CARGO_TARGET_DIR", f"{rs_venv}/target")
+        script.export("RS_VENV", rs_venv)
+
+    def emit_cargo(self, script: Script, args: list[str]) -> None:
+        """Emit a cargo command for Rust builds."""
+        path = script.workspace_path(self.abs_path)
+        is_new = script.enter_project(path)
+        if is_new:
+            self.emit_rs_env(script)
+        script.run(["cargo"] + args)
+
+    def emit_ts_env(self, script: Script) -> None:
+        """Emit TypeScript/Node environment, routing node_modules into the venv."""
+        ts_venv = script.workspace_path(self.venv_path)
+        script.export("TS_VENV", ts_venv)
+        script.export("TS_NODE_MODULES", f"{ts_venv}/node_modules")
+        script.export("NODE_PATH", "$TS_NODE_MODULES")
+        script.raw("_SAVED_PATH=$PATH")
+        script.raw("export PATH=$TS_NODE_MODULES/.bin:$PATH")
 
 
 # ---------------------------------------------------------------------------
@@ -1727,6 +1756,174 @@ def cmd_license_check_haskell(
     script: Script, project: Project, args: list[str]
 ) -> None:
     """Check dependency licenses (no-op for Haskell)."""
+    del args  # unused
+    script.info(f"License check for {project.path} (no-op)")
+
+
+# ---------------------------------------------------------------------------
+# Common project commands - Rust
+# ---------------------------------------------------------------------------
+
+
+@command("venv", "Sync dependencies", lang=Lang.Rust)
+def cmd_venv_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Fetch Rust dependencies with cargo."""
+    del args  # unused
+    script.info(f"Fetching dependencies for {project.path}")
+    project.emit_cargo(script, ["fetch"])
+
+
+@command("format", "Format code", lang=Lang.Rust)
+def cmd_format_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Format Rust code with rustfmt."""
+    del args  # unused
+    script.info(f"Formatting {project.path}")
+    project.emit_cargo(script, ["fmt"])
+
+
+@command("typecheck", "Typecheck code", lang=Lang.Rust)
+def cmd_typecheck_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Typecheck Rust code with cargo check."""
+    del args  # unused
+    script.info(f"Typechecking {project.path}")
+    project.emit_cargo(script, ["check"])
+
+
+@command("lint", "Lint code", lang=Lang.Rust)
+def cmd_lint_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Lint Rust code with clippy."""
+    del args  # unused
+    script.info(f"Linting {project.path}")
+    project.emit_cargo(script, ["clippy", "--", "-D", "warnings"])
+
+
+@command("unit", "Run unit tests", lang=Lang.Rust)
+def cmd_unit_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Run Rust tests with cargo test."""
+    script.info(f"Testing {project.path}")
+    project.emit_cargo(script, ["test"] + args)
+
+
+@command("clean", "Clean generated files and caches", lang=Lang.Rust)
+def cmd_clean_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Clean Rust build artifacts."""
+    del args  # unused
+    script.info(f"Cleaning {project.path}")
+    venv = script.workspace_path(project.venv_path)
+    project.emit_cargo(script, ["clean"])
+    script.run(["rm", "-rf", venv])
+
+
+@command("repl", "Start a REPL", project_only=True, lang=Lang.Rust)
+def cmd_repl_rs(script: Script, project: Project, args: list[str]) -> None:
+    """No standard REPL for Rust."""
+    del args  # unused
+    script.warn(f"No REPL available for Rust project {project.path}")
+
+
+@command("license-check", "Check dependency licenses", lang=Lang.Rust)
+def cmd_license_check_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Check dependency licenses (no-op for Rust)."""
+    del args  # unused
+    script.info(f"License check for {project.path} (no-op)")
+
+
+# ---------------------------------------------------------------------------
+# Common project commands - TypeScript
+# ---------------------------------------------------------------------------
+
+
+@command("venv", "Sync dependencies", lang=Lang.TypeScript)
+def cmd_venv_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Install TypeScript dependencies with npm into the venv directory."""
+    del args  # unused
+    script.info(f"Installing dependencies for {project.path}")
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    project.emit_ts_env(script)
+    script.raw("rm -rf node_modules")
+    script.raw("mkdir -p $(dirname $TS_NODE_MODULES)")
+    script.raw("cp package.json $(dirname $TS_NODE_MODULES)/")
+    script.raw("cp package-lock.json $(dirname $TS_NODE_MODULES)/ 2>/dev/null || true")
+    script.raw('echo "+ npm install --prefix $(dirname $TS_NODE_MODULES)"')
+    script.raw("npm install --prefix $(dirname $TS_NODE_MODULES)")
+    script.raw("cp $(dirname $TS_NODE_MODULES)/package-lock.json . 2>/dev/null || true")
+
+
+@command("format", "Format code", lang=Lang.TypeScript)
+def cmd_format_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Format TypeScript code with prettier."""
+    del args  # unused
+    script.info(f"Formatting {project.path}")
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_ts_env(script)
+    script.run(["$TS_NODE_MODULES/.bin/prettier", "--write", "src/"])
+
+
+@command("typecheck", "Typecheck code", lang=Lang.TypeScript)
+def cmd_typecheck_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Typecheck TypeScript code with tsc."""
+    del args  # unused
+    script.info(f"Typechecking {project.path}")
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_ts_env(script)
+    script.run(["$TS_NODE_MODULES/.bin/tsc", "--noEmit"])
+
+
+@command("lint", "Lint code", lang=Lang.TypeScript)
+def cmd_lint_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Lint TypeScript code with eslint."""
+    del args  # unused
+    script.info(f"Linting {project.path}")
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_ts_env(script)
+    script.run(["$TS_NODE_MODULES/.bin/eslint", "src/"])
+
+
+@command("unit", "Run unit tests", lang=Lang.TypeScript)
+def cmd_unit_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Run TypeScript tests."""
+    script.info(f"Testing {project.path}")
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_ts_env(script)
+    script.run(["$TS_NODE_MODULES/.bin/jest"] + args)
+
+
+@command("clean", "Clean generated files and caches", lang=Lang.TypeScript)
+def cmd_clean_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Clean TypeScript build artifacts."""
+    del args  # unused
+    script.info(f"Cleaning {project.path}")
+    venv = script.workspace_path(project.venv_path)
+    script.pushd(script.workspace_path(project.abs_path))
+    script.run(["rm", "-rf", "node_modules", "dist"])
+    script.run(["rm", "-rf", venv])
+    script.popd()
+
+
+@command("repl", "Start a REPL", project_only=True, lang=Lang.TypeScript)
+def cmd_repl_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Start a Node.js REPL."""
+    del args  # unused
+    script.info(f"Starting Node REPL for {project.path}")
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_ts_env(script)
+    script.run(["node"])
+
+
+@command("license-check", "Check dependency licenses", lang=Lang.TypeScript)
+def cmd_license_check_ts(script: Script, project: Project, args: list[str]) -> None:
+    """Check dependency licenses (no-op for TypeScript)."""
     del args  # unused
     script.info(f"License check for {project.path} (no-op)")
 
@@ -2917,8 +3114,8 @@ def expand_project_pattern(
     if workspace_root is None:
         workspace_root = get_workspace_root()
 
-    # Language filter patterns: /py, /ps, /hs, /meta
-    if pattern in ("/py", "/ps", "/hs", "/meta"):
+    # Language filter patterns: /py, /ps, /hs, /meta, /rs, /ts
+    if pattern in ("/py", "/ps", "/hs", "/meta", "/rs", "/ts"):
         lang_filter = pattern[1:]  # "py", "ps", "hs", or "meta"
         matches = []
         for proj_path in all_projects:
@@ -2947,7 +3144,7 @@ def expand_project_pattern(
         lang_filter = parts[1]  # "py", "ps", "hs", or "meta"
         parent_name = parts[2]
 
-        if lang_filter in ("py", "ps", "meta", "hs"):
+        if lang_filter in ("py", "ps", "meta", "hs", "rs", "ts"):
             prefix = f"/lib/{parent_name}/"
             matches = []
             for proj_path in all_projects:
@@ -3196,6 +3393,10 @@ def emit_custom_target(
         project.emit_ps_env(script)
     elif project.language == Lang.Haskell:
         project.emit_hs_env(script)
+    elif project.language == Lang.Rust:
+        project.emit_rs_env(script)
+    elif project.language == Lang.TypeScript:
+        project.emit_ts_env(script)
 
     for i, step in enumerate(steps):
         is_last = i == len(steps) - 1
@@ -3258,9 +3459,8 @@ def emit_command(
         # Regular command: emit via language-specific handler
         handler = cmd.get_handler(project.language)
         if handler is None:
-            # Meta projects skip commands without handlers (no-op)
-            if project.language == Lang.Meta:
-                script.info(f"Skipping {cmd.name} for {project.path} (meta project)")
+            if project.language in (Lang.Meta, Lang.Rust, Lang.TypeScript):
+                script.info(f"Skipping {cmd.name} for {project.path} ({project.language.name})")
                 return
             raise AssertionError(f"No handler for {cmd.name} with {project.language}")
         handler(script, project, args)
@@ -3544,7 +3744,7 @@ def main(workspace_root: Path | None = None) -> int:
         epilog="""
 Project patterns:
   / or /lib                                All projects
-  /py, /ps, /hs, /meta                    All projects by language
+  /py, /ps, /hs, /meta, /rs, /ts          All projects by language
   /py/core or /lib/core                    Specific project
   ^/py/core                                Exclude a project
 

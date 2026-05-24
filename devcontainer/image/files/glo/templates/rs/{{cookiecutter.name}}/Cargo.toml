@@ -1,0 +1,7 @@
+[package]
+name = "{{cookiecutter.name}}"
+version = "{{cookiecutter.version}}"
+edition = "2021"
+description = "{{cookiecutter.description}}"
+
+[dependencies]

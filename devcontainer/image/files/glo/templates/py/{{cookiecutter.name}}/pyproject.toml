@@ -1,0 +1,10 @@
+[project]
+name = "{{cookiecutter.name}}"
+version = "{{cookiecutter.version}}"
+requires-python = ">=3.14"
+description = "{{cookiecutter.description}}"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

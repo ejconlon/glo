@@ -52,13 +52,20 @@ for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*; do
     fi
 done
 
-# Scaffold base/ workspace directories
-if [[ ! -d "${WORKSPACE_DIR}/base/issue" ]]; then
-    mkdir -p "${WORKSPACE_DIR}/base/issue"
-    echo "[I] Created base/issue/"
-else
-    echo "[I] base/issue/ already exists, skipping"
-fi
+# Scaffold workspace directories
+for _gitkeep in \
+    "base/issue/.gitkeep" \
+    "base/wiki/.gitkeep" \
+    "lib/.gitkeep"
+do
+    if [[ ! -e "${WORKSPACE_DIR}/${_gitkeep}" ]]; then
+        mkdir -p "${WORKSPACE_DIR}/$(dirname "$_gitkeep")"
+        touch "${WORKSPACE_DIR}/${_gitkeep}"
+        echo "[I] Created $(dirname "$_gitkeep")/"
+    else
+        echo "[I] $(dirname "$_gitkeep")/ already exists, skipping"
+    fi
+done
 
 # Add generated paths to .gitignore
 add_to_gitignore() {
@@ -71,6 +78,5 @@ add_to_gitignore() {
 }
 
 add_to_gitignore ".glo/"
-add_to_gitignore "bin/"
 
 echo "[I] Done. To build: just -f ${SCRIPT_DIR}/devcontainer/justfile build"

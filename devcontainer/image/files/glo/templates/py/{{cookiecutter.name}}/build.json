@@ -1,0 +1,4 @@
+{
+  "language": "py",
+  "py_package": "{{cookiecutter.name}}"
+}

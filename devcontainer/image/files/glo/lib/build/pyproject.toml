@@ -3,7 +3,9 @@ name = "glo_build"
 version = "0.1.0"
 requires-python = ">=3.14"
 description = "Lightweight build system for monorepos"
-dependencies = []
+dependencies = [
+    "cookiecutter>=2.6.0",
+]
 
 [project.scripts]
 glo-build = "glo_build.cli:main"

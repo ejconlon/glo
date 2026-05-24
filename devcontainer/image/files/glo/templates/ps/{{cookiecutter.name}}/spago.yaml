@@ -1,0 +1,8 @@
+package:
+  name: {{cookiecutter.name}}
+  version: {{cookiecutter.version}}
+  description: {{cookiecutter.description}}
+  dependencies:
+    - prelude
+  sources:
+    - src/**/*.purs

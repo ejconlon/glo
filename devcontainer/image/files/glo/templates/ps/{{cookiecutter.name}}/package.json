@@ -1,0 +1,11 @@
+{
+  "name": "{{cookiecutter.name}}",
+  "version": "{{cookiecutter.version}}",
+  "description": "{{cookiecutter.description}}",
+  "private": true,
+  "scripts": {},
+  "dependencies": {
+    "purescript-psa": "^0.9.0",
+    "spago": "^0.21.0"
+  }
+}
