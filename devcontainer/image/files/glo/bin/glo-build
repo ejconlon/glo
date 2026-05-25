@@ -46,6 +46,26 @@ if [[ -z "${GLO_BUILD_CMD:-}" ]]; then
 fi
 export GLO_BUILD_CMD
 
+_ensure_cargo_on_path() {
+    if command -v cargo >/dev/null 2>&1; then
+        return
+    fi
+
+    local cargo_path=""
+    if command -v rustup >/dev/null 2>&1; then
+        cargo_path="$(rustup which cargo 2>/dev/null || true)"
+        if [[ -x "$cargo_path" ]]; then
+            export PATH="${cargo_path%/*}:$PATH"
+            return
+        fi
+    fi
+
+    if [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+}
+_ensure_cargo_on_path
+
 # Default execution mode: "local" or "docker"
 # Change this to "docker" to run builds in containers by default
 DEFAULT_MODE="local"
@@ -176,10 +196,10 @@ build_docker_args() {
     # Workspace mount
     args_ref+=(-v "${HOST_WORKDIR}:${CONTAINER_WORKDIR}")
 
-    # Overlay .cache from SCRIPT_DIR so plan files are visible in the container
+    # Overlay .glo/cache from SCRIPT_DIR so plan files are visible in the container
     # (needed when HOST_WORKDIR differs from SCRIPT_DIR, e.g. agent builds)
     if [[ "${HOST_WORKDIR}" != "${WORKSPACE_DIR}" ]]; then
-        args_ref+=(-v "${WORKSPACE_DIR}/.cache:${CONTAINER_WORKDIR}/.cache")
+        args_ref+=(-v "${WORKSPACE_DIR}/.glo/cache:${CONTAINER_WORKDIR}/.glo/cache")
     fi
 
     # Venv volume (shared with devrun.sh)
@@ -199,9 +219,9 @@ build_docker_args() {
 }
 
 # Create temp file for the build plan (in workspace so docker can access it)
-PLAN_NAME="loupe-build.$$.sh"
-PLAN_PATH="${WORKSPACE_DIR}/.cache/${PLAN_NAME}"
-mkdir -p "${WORKSPACE_DIR}/.cache"
+PLAN_NAME="glo-build.$$.sh"
+PLAN_PATH="${WORKSPACE_DIR}/.glo/cache/${PLAN_NAME}"
+mkdir -p "${WORKSPACE_DIR}/.glo/cache"
 
 cleanup() {
     rm -f "$PLAN_PATH"
@@ -229,7 +249,7 @@ else
                 UV_PYTHON_INSTALL_DIR=/opt/glo/python UV_PROJECT_ENVIRONMENT="$VENV_DIR" uv sync --project /opt/glo/lib/build --package glo_build
             fi
             PYTHON="${VENV_DIR}/bin/python3"
-            WORKSPACE="$CONTAINER_WORKDIR" "$PYTHON" -m glo_build.cli --plan-path "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}" "$@"
+            WORKSPACE="$CONTAINER_WORKDIR" "$PYTHON" -m glo_build.cli --plan-path "${CONTAINER_WORKDIR}/.glo/cache/${PLAN_NAME}" "$@"
         ' -- "$@"
     exit_code=$?
 fi
@@ -252,7 +272,7 @@ if [[ -s "$PLAN_PATH" ]]; then
 
         docker_args+=(-e "WORKSPACE=${CONTAINER_WORKDIR}")
         docker run "${docker_args[@]}" "${DEV_IMAGE}" \
-            bash "${CONTAINER_WORKDIR}/.cache/${PLAN_NAME}"
+            bash "${CONTAINER_WORKDIR}/.glo/cache/${PLAN_NAME}"
         exit_code=$?
     fi
 
