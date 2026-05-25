@@ -5,6 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$PWD"
 PROJECT_NAME="$(basename "$WORKSPACE_DIR")"
 
+relpath() {
+    local from="$1"
+    local to="$2"
+    if command -v grealpath >/dev/null 2>&1; then
+        grealpath --relative-to="$from" "$to"
+    elif realpath --relative-to="$from" "$to" >/dev/null 2>&1; then
+        realpath --relative-to="$from" "$to"
+    else
+        python3 -c 'import os, sys; print(os.path.relpath(os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[1])))' "$from" "$to"
+    fi
+}
+
 echo "[I] Bootstrapping devcontainer for project: $PROJECT_NAME"
 echo "[I] Workspace: $WORKSPACE_DIR"
 
@@ -18,7 +30,7 @@ echo "[I] Generated .devcontainer/devcontainer.json"
 
 # Symlink image directory using a relative path for portability
 if [[ ! -e "${WORKSPACE_DIR}/.devcontainer/image" ]]; then
-    IMAGE_REL="$(realpath --relative-to="${WORKSPACE_DIR}/.devcontainer" "${SCRIPT_DIR}/devcontainer/image")"
+    IMAGE_REL="$(relpath "${WORKSPACE_DIR}/.devcontainer" "${SCRIPT_DIR}/devcontainer/image")"
     ln -sf "$IMAGE_REL" "${WORKSPACE_DIR}/.devcontainer/image"
     echo "[I] Created .devcontainer/image -> $IMAGE_REL"
 else
@@ -45,7 +57,7 @@ for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*; do
     name="$(basename "$script")"
     dest="${WORKSPACE_DIR}/bin/${name}"
     if [[ ! -e "$dest" || -L "$dest" ]] || grep -q "exec /opt/glo/bin/${name}" "$dest" 2>/dev/null; then
-        rel="$(realpath --relative-to="${WORKSPACE_DIR}/bin" "$script")"
+        rel="$(relpath "${WORKSPACE_DIR}/bin" "$script")"
         [[ -L "$dest" ]] && rm -f "$dest"
         cat > "$dest" <<EOF
 #!/usr/bin/env bash
@@ -81,7 +93,7 @@ done
 
 # Generate justfile from template, substituting the relative path to glo
 if [[ ! -e "${WORKSPACE_DIR}/justfile" ]]; then
-    GLO_REL="$(realpath --relative-to="${WORKSPACE_DIR}" "${SCRIPT_DIR}")"
+    GLO_REL="$(relpath "${WORKSPACE_DIR}" "${SCRIPT_DIR}")"
     sed "s|__GLO__|${GLO_REL}|g" \
         "${SCRIPT_DIR}/template/justfile" \
         > "${WORKSPACE_DIR}/justfile"

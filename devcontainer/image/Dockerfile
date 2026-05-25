@@ -75,10 +75,10 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip \
 # Install rustup and Rust toolchain from GitHub releases with SHA256 verification
 # We need Rust 1.85.0+ for features required by tantivy 0.25.0
 ARG RUST_ENABLED=1
-ARG RUSTUP_VERSION=1.27.1
-ARG RUSTUP_SHA256_X64=6aeece6993e902708983b209d04c0d1dbb14ebb405ddb87def578d41f920f56d
-ARG RUSTUP_SHA256_ARM64=1cffbf51e63e634c746f741de50649bbbcbd9dbe1de363c9ecef64e278dba2b2
-ARG RUST_VERSION=1.92.0
+ARG RUSTUP_VERSION=1.29.0
+ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
+ARG RUST_VERSION=1.95.0
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
@@ -192,9 +192,9 @@ RUN if [ "${ZK_ENABLED}" = "1" ]; then \
 # Install Node.js from official upstream binaries.
 # RHEL's packaged Node.js has a V8 bug causing SIGSEGV in interactive TUI apps
 # (e.g. gemini-cli Ink rendering). Upstream binaries don't have this issue.
-ARG NODE_VERSION=22.22.0
-ARG NODE_SHA256_X64=9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
-ARG NODE_SHA256_ARM64=1bf1eb9ee63ffc4e5d324c0b9b62cf4a289f44332dfef9607cea1a0d9596ba6f
+ARG NODE_VERSION=24.16.0
+ARG NODE_SHA256_X64=d804845d34eddc21dc1092b519d643ef40b1f58ec5dec5c22b1f4bd8fabde6c9
+ARG NODE_SHA256_ARM64=524659219d6a207a7400f2bde15d19ba060ffbe0d32a8643319ad67e3bb64c78
 RUN set -eux; \
     arch="$(uname -m)"; \
     case "${arch}" in \
@@ -208,6 +208,12 @@ RUN set -eux; \
     rm -f /tmp/node.tar.xz; \
     node --version; \
     npm --version
+
+# Install PureScript tooling.
+ARG PURESCRIPT_ENABLED=1
+RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
+    npm install -g purescript spago purs-tidy; \
+    fi
 
 # Install ghcup and Haskell toolchain (ghc, cabal, stack, hls, ormolu, hlint)
 # To update ghcup: change GHCUP_VERSION, then get SHA256s from:
@@ -261,9 +267,9 @@ RUN groupadd --gid 1000 user \
 #   curl -fsSL "$gcs_bucket/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
 #   curl -fsSL "$gcs_bucket/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
 ARG CLAUDE_ENABLED=1
-ARG CLAUDE_VERSION=2.1.147
-ARG CLAUDE_SHA256_X64=d3e134bf504d6ff7db68d0a6f2206c9a15a6d2f94053845116f3303b0a0d79d4
-ARG CLAUDE_SHA256_ARM64=c7b5b050f9a4cebdc1b369935d3f64078b587b869ae8789c06c437c559d6bb2b
+ARG CLAUDE_VERSION=2.1.150
+ARG CLAUDE_SHA256_X64=6c086a0f5fbf684d4148bb69629268b4f5109498c1a7be757acf18c51fd04f4b
+ARG CLAUDE_SHA256_ARM64=2052949543ea076e2b5cda44c031b2b34fc303db98dc56ad6583b7e0a417ebeb
 RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -288,8 +294,8 @@ ARG AGENTS_ENABLED=1
 RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
     npm install -g \
       @openai/codex@0.133.0 \
-      @google/gemini-cli@0.42.0 \
-      opencode-ai@1.15.7; \
+      @google/gemini-cli@0.43.0 \
+      opencode-ai@1.15.10; \
     fi
 
 # Install glo

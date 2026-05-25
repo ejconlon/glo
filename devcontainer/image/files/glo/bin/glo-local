@@ -5,8 +5,8 @@ GHC_VERSION="9.12.4"
 CABAL_VERSION="3.16.1.0"
 STACK_VERSION="3.9.3"
 HLS_VERSION="2.14.0.0"
-RUST_VERSION="1.92.0"
-NODE_VERSION="22.22.0"
+RUST_VERSION="1.95.0"
+NODE_VERSION="24.16.0"
 
 DRY_RUN=0
 OS=""
@@ -22,6 +22,7 @@ Usage: glo-local [--dry-run] <command>
 
 Commands:
   all       Install base, py, rs, hs, ts, ps, notes
+  need      Install all except toolchains disabled in .devcontainer/*.json*
   base      Install common CLI tools
   py        Install Python/uv tooling
   rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src
@@ -97,10 +98,11 @@ install_base() {
     log "Installing base tools for ${OS}/${ARCH}"
     case "$OS" in
         arch)
-            pkg_install base-devel git github-cli jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip tar gzip bzip2 xz zstd openssh make pkgconf
+            pkg_install base-devel bash coreutils git github-cli jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip tar gzip bzip2 xz zstd openssh make pkgconf
+            run aura -A devcontainer-cli
             ;;
         macos)
-            pkg_install git gh jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip xz zstd pkgconf
+            pkg_install bash coreutils devcontainer git gh jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip xz zstd pkgconf
             ;;
     esac
 }
@@ -195,9 +197,9 @@ install_hs() {
     run ghcup install stack "$STACK_VERSION" --set
     run ghcup install hls "$HLS_VERSION" --set
     run ghcup config add-release-channel 3rdparty
-    run ghcup install ormolu
+    run ghcup install ormolu || warn "ormolu install failed; continuing"
     run ghcup install hlint
-    link_latest_ghcup_tool ormolu
+    link_latest_ghcup_tool ormolu || warn "ormolu link failed; continuing"
     link_latest_ghcup_tool hlint
 }
 
@@ -206,11 +208,11 @@ install_ts() {
     log "Installing TypeScript/Node tooling"
     case "$OS" in
         arch)
-            pkg_install nodejs npm
+            pkg_install nodejs-lts-krypton npm
             ;;
         macos)
-            pkg_install node@22
-            warn "If node is not on PATH, run: brew link --overwrite --force node@22"
+            pkg_install node@24
+            warn "If node is not on PATH, run: brew link --overwrite --force node@24"
             ;;
     esac
     TS_DONE=1
@@ -240,11 +242,68 @@ install_notes() {
     esac
 }
 
+find_workspace() {
+    local d="$PWD"
+    while [[ "$d" != "/" ]]; do
+        if [[ -d "$d/.devcontainer" ]]; then
+            printf '%s\n' "$d"
+            return 0
+        fi
+        d="$(dirname "$d")"
+    done
+    printf '%s\n' "$PWD"
+}
+
+devcontainer_arg_disabled() {
+    local flag="$1"
+    local workspace="$2"
+    local file
+    shopt -s nullglob
+    for file in "$workspace"/.devcontainer/*.json "$workspace"/.devcontainer/*.jsonc; do
+        if grep -Eiq '"'"$flag"'"[[:space:]]*:[[:space:]]*"?(0|false|no|off)"?' "$file"; then
+            shopt -u nullglob
+            return 0
+        fi
+    done
+    shopt -u nullglob
+    return 1
+}
+
+install_need() {
+    local workspace
+    workspace="$(find_workspace)"
+
+    install_base
+    install_py
+
+    if devcontainer_arg_disabled RUST_ENABLED "$workspace"; then
+        log "Skipping Rust toolchain; RUST_ENABLED is disabled"
+    else
+        install_rs
+    fi
+
+    if devcontainer_arg_disabled HASKELL_ENABLED "$workspace"; then
+        log "Skipping Haskell toolchain; HASKELL_ENABLED is disabled"
+    else
+        install_hs
+    fi
+
+    install_ts
+
+    if devcontainer_arg_disabled PURESCRIPT_ENABLED "$workspace"; then
+        log "Skipping PureScript tooling; PURESCRIPT_ENABLED is disabled"
+    else
+        install_ps
+    fi
+
+    install_notes
+}
+
 doctor() {
     printf 'OS:   %s\n' "$OS"
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
-    for tool in git gh just fd bat rg shellcheck jq yq sqlite3 uv python3 rustup rustc cargo ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else
@@ -282,6 +341,7 @@ main() {
             install_ps
             install_notes
             ;;
+        need) install_need ;;
         base) install_base ;;
         py) install_py ;;
         rs) install_rs ;;

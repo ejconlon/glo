@@ -799,9 +799,13 @@ class Project:
     def emit_ps_env(self, script: Script) -> None:
         """Emit PureScript environment setup to script using ${WORKSPACE}."""
         cache_dir = script.workspace_path(
-            self.workspace_root / ".cache" / "ps" / self.venv_name
+            self.workspace_root / ".glo" / "cache" / "ps" / self.venv_name
         )
         script.export("XDG_CACHE_HOME", cache_dir)
+        script.export(
+            "NPM_CONFIG_CACHE",
+            script.workspace_path(self.workspace_root / ".glo" / "cache" / "npm"),
+        )
         # Set directories in .venv (use relative paths for spago/purs compatibility)
         rel_venv = os.path.relpath(self.venv_path, self.abs_path)
         script.export("PS_VENV", rel_venv)
@@ -932,6 +936,10 @@ class Project:
         ts_venv = script.workspace_path(self.venv_path)
         script.export("TS_VENV", ts_venv)
         script.export("TS_NODE_MODULES", f"{ts_venv}/node_modules")
+        script.export(
+            "NPM_CONFIG_CACHE",
+            script.workspace_path(self.workspace_root / ".glo" / "cache" / "npm"),
+        )
         script.export("NODE_PATH", "$TS_NODE_MODULES")
         script.raw("_SAVED_PATH=$PATH")
         script.raw("export PATH=$TS_NODE_MODULES/.bin:$PATH")
@@ -1629,6 +1637,7 @@ def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> Non
     dirs = ["src"]
     if (project.abs_path / "test").exists():
         dirs.append("test")
+    script.raw('if ! command -v ormolu >/dev/null 2>&1; then echo "[I] Skipping Haskell format; ormolu not found"; exit 0; fi')
     script.raw('_ORMOLU_CONF="${WORKSPACE}/config/hs/ormolu.yaml"')
     script.raw(
         '[ -f "$_ORMOLU_CONF" ]'
@@ -2644,10 +2653,14 @@ log_warn() { echo -e "${YELLOW}[W]${RESET} $1"; }
 
 # Print with lock to prevent interleaved output
 print_locked() {
-    (
-        flock 200
+    if command -v flock >/dev/null 2>&1; then
+        (
+            flock 200
+            cat
+        ) 200>"$LOCK_FILE"
+    else
         cat
-    ) 200>"$LOCK_FILE"
+    fi
 }
 
 # Check if all dependencies of a task are completed successfully

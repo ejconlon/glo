@@ -187,7 +187,7 @@ cmd_focus_pop() {
     id=$(tail -1 "$stack")
     # Remove last line
     local tmp="${stack}.tmp.$$"
-    head -n -1 "$stack" > "$tmp"
+    sed '$d' "$stack" > "$tmp"
     mv "$tmp" "$stack"
     # Pause the popped issue
     issue status "$id" open

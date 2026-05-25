@@ -237,7 +237,7 @@ glo-local doctor                  # show detected OS/arch and installed tools
 glo-local --dry-run all           # print install commands without running them
 glo-local base                    # common CLI tools
 glo-local py                      # Python and uv
-glo-local rs                      # Rust 1.92.0 + rustfmt/clippy/rust-analyzer/rust-src
+glo-local rs                      # Rust 1.95.0 + rustfmt/clippy/rust-analyzer/rust-src
 glo-local hs                      # GHC 9.12.4, cabal 3.16.1.0, stack 3.9.3, HLS 2.14.0.0, ormolu, hlint via ghcup
 glo-local ts                      # Node/npm
 glo-local ps                      # PureScript tooling via npm
