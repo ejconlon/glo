@@ -15,7 +15,6 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
 [[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
 
 TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
@@ -613,7 +612,7 @@ cmd_issue() {
 cmd_help() {
     cat <<EOF
 glo-agent - agent-aware issue CLI
-See $README for full documentation.
+Run 'glo readme' for full documentation.
 
 Usage: glo-agent <command> [args]
 

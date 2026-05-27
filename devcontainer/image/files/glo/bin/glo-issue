@@ -14,7 +14,6 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-README="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../README.md"
 
 : "${TICKETS_DIR:=${WORKSPACE_DIR}/base/issue}"
 [[ -d "$TICKETS_DIR" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
@@ -1371,7 +1370,7 @@ cmd_help() {
     cmd=$(basename "$0")
     cat << EOF
 $cmd - minimal ticket system with dependency tracking
-See $README for full documentation.
+Run 'glo readme' for full documentation.
 
 Usage: $cmd <command> [args]
 

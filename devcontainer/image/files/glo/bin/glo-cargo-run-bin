@@ -17,7 +17,7 @@ mkdir -p "${RS_VENV}/bin"
 dest="${RS_VENV}/bin/${tool}"
 
 cleanup() {
-    rm -rf .bin
+    rm -rf "${RS_VENV}/.bin" "${RS_VENV}/Cargo.toml" "${RS_VENV}/Cargo.lock"
 }
 
 if [[ ! -x "$dest" ]]; then
@@ -26,15 +26,16 @@ if [[ ! -x "$dest" ]]; then
     trap cleanup EXIT
 
     if [[ ! -x "$dest" ]]; then
-        rm -rf .bin
-        cargo bin --install
-        src="$(find .bin -path "*/bin/${tool}" -type f -perm -u+x | sort | tail -n 1)"
+        cleanup
+        cp Cargo.toml Cargo.lock "${RS_VENV}/"
+        (cd "${RS_VENV}" && cargo bin --install)
+        src="$(find "${RS_VENV}/.bin" -path "*/bin/${tool}" -type f -perm -u+x | sort | tail -n 1)"
         if [[ -z "$src" ]]; then
             echo "cargo bin did not install ${tool}" >&2
             exit 1
         fi
         install -m 755 "$src" "$dest"
-        rm -rf .bin
+        cleanup
     fi
 
     trap - EXIT

@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from loupe_build.cli import (
+from glo_build.cli import (
     expand_project_pattern,
     parse_args_sequence,
     validate_exclusion,
@@ -64,7 +64,7 @@ def setup_workspace(tmp_path: Path) -> None:
         proj_dir = lib_dir / name
         proj_dir.mkdir()
         (proj_dir / "build.json").write_text(
-            f'{{"language": "py", "py_package": "loupe_{name}"}}'
+            f'{{"language": "py", "py_package": "glo_{name}"}}'
         )
 
     for name in ps_projects:

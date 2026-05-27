@@ -1,1 +1,1 @@
-"""Tests for the loupe_build package."""
+"""Tests for the glo_build package."""

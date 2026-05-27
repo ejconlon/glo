@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lightweight build system for the Loupe monorepo.
+# Lightweight build system for glo.
 # See /opt/glo/lib/build/glo_build/cli.py for the implementation in the image.
 set -euo pipefail
 
@@ -14,7 +14,6 @@ _find_workspace() {
 }
 WORKSPACE_DIR="$(_find_workspace)"
 _GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-README="${_GLO_BIN_DIR}/../README.md"
 
 if [[ -d "${_GLO_BIN_DIR}/../lib/build" ]]; then
     GLO_BUILD_PROJECT="$(realpath "${_GLO_BIN_DIR}/../lib/build")"
@@ -71,8 +70,8 @@ _ensure_cargo_on_path
 DEFAULT_MODE="local"
 
 # Docker configuration
-DEV_IMAGE="${DEV_IMAGE:-loupe_dev}"
-CONTAINER_USER="loupe"
+DEV_IMAGE="${DEV_IMAGE:-glo_dev}"
+CONTAINER_USER="glo"
 CONTAINER_HOME="/home/${CONTAINER_USER}"
 CONTAINER_WORKDIR="${CONTAINER_HOME}/workspace"
 # HOST_WORKDIR is the path on the docker host that maps to SCRIPT_DIR
@@ -91,7 +90,7 @@ EXEC_MODE=""
 
 for _a in "$@"; do
     if [[ "$_a" == "--help" || "$_a" == "-h" ]]; then
-        echo "glo-build - lightweight build system. See $README for full documentation."
+        echo "glo-build - lightweight build system. Run 'glo readme' for full documentation."
         break
     fi
 done
@@ -158,7 +157,7 @@ while (($# > 0)); do
             shift
             ;;
         *)
-            # Stop parsing mode flags, rest goes to loupe_build
+            # Stop parsing mode flags, rest goes to glo_build
             break
             ;;
     esac
@@ -179,7 +178,7 @@ fi
 
 # Compute volume name hash (matches devrun.sh)
 WORKDIR_HASH="$(printf '%s' "${HOST_WORKDIR}" | sha256sum | cut -c1-12)"
-VENV_VOLUME="loupe-venvs-${WORKDIR_HASH}"
+VENV_VOLUME="glo-venvs-${WORKDIR_HASH}"
 
 # Detect host timezone for container sync
 HOST_TZ="${TZ:-}"

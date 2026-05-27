@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Lightweight build system for the Loupe monorepo.
+Lightweight build system for glo.
 
 Usage:
-    ./build.py                          # List all commands
-    ./build.py <command>                # Run command on all projects
-    ./build.py <project> <command>      # Run command on specific project
-    ./build.py <project> <command> ...  # Run command with extra args
-    ./build.py --dryrun <command>       # Print bash script without executing
+    glo-build                          # List all commands
+    glo-build <command>                # Run command on all projects
+    glo-build <project> <command>      # Run command on specific project
+    glo-build <project> <command> ...  # Run command with extra args
+    glo-build --dryrun <command>       # Print bash script without executing
 
 Project patterns:
     / or /lib                           # All projects
@@ -21,17 +21,17 @@ Target exclusions:
 Argument passing:
     Arguments after a single target are passed to that target's command.
     Meta-commands (like precommit) do not accept arguments.
-    Use -- to pass flags to the target: ./build.py train -- --help
+    Use -- to pass flags to the target: glo-build train -- --help
 
 Examples:
-    ./build.py /py/core format
-    ./build.py /lib/core test
-    ./build.py precommit
-    ./build.py /py ^/py/core precommit  # All Python projects except core
-    ./build.py precommit ^test          # Precommit without running tests
-    ./build.py /py/web dev --port 9000
-    ./build.py precommit -- -k test_foo # Pass -k to test subtarget
-    ./build.py --dryrun /py/core precommit
+    glo-build /py/core format
+    glo-build /lib/core test
+    glo-build precommit
+    glo-build /py ^/py/core precommit  # All Python projects except core
+    glo-build precommit ^test          # Precommit without running tests
+    glo-build /py/web dev --port 9000
+    glo-build precommit -- -k test_foo # Pass -k to test subtarget
+    glo-build --dryrun /py/core precommit
 """
 
 import argparse
@@ -636,7 +636,7 @@ class BuildConfig:
 
     _path: str  # e.g., "lib/core"
     language_str: str  # "py", "ps", or "meta"
-    py_package: str | None = None  # e.g., "loupe_core" (Python only)
+    py_package: str | None = None  # e.g., "glo_core" (Python only)
     extra_deps: list[str] | None = None
     targets: dict[str, list[TargetStep]] | None = None  # Custom targets
     enabled: bool = True
@@ -1306,9 +1306,9 @@ def cmd_pypackage_py(script: Script, project: Project, args: list[str]) -> None:
     # Compile to .pyc and remove sources in non-debug builds
     if not debug:
         script.info("Compiling .py files to .pyc for internal packages")
-        # Compile main package and any loupe_* workspace dependencies
+        # Compile main package and any glo_* workspace dependencies
         script.raw(
-            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/loupe_*; do'
+            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/glo_*; do'
         )
         script.raw('    if [ -d "$PKG_DIR" ]; then')
         script.raw('        DIR_NAME=$(basename "$PKG_DIR")')
@@ -1324,7 +1324,7 @@ def cmd_pypackage_py(script: Script, project: Project, args: list[str]) -> None:
 
         script.info("Removing .py source files from internal packages")
         script.raw(
-            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/loupe_*; do'
+            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/glo_*; do'
         )
         script.raw('    if [ -d "$PKG_DIR" ]; then')
         script.raw('        find "$PKG_DIR" -type f -name "*.py" -delete')
@@ -2053,7 +2053,7 @@ def cmd_dev_py(script: Script, project: Project, args: list[str]) -> None:
         extra_args = ["--port", port] + extra_args
     project.emit_python(
         script,
-        ["-m", "uvicorn", "loupe_web.app:app", "--reload"],
+        ["-m", "uvicorn", "glo_web.app:app", "--reload"],
         extra_args=extra_args,
     )
 
@@ -2083,7 +2083,7 @@ def cmd_serve_py(script: Script, project: Project, args: list[str]) -> None:
         extra_args = ["--port", port] + extra_args
     project.emit_python(
         script,
-        ["-m", "uvicorn", "loupe_web.app:app", "--host", "0.0.0.0"],
+        ["-m", "uvicorn", "glo_web.app:app", "--host", "0.0.0.0"],
         extra_args=extra_args,
     )
 
@@ -2166,7 +2166,7 @@ def cmd_fetch(script: Script, project: Project, args: list[str]) -> None:
         return
     model_name = args[0]
     script.info(f"Fetching model: {model_name}")
-    project.emit_python(script, ["-m", "loupe_model.fetch", model_name])
+    project.emit_python(script, ["-m", "glo_model.fetch", model_name])
 
 
 @command("bench", "Run benchmark on a model", project_only=True, lang=Lang.Python)
@@ -2185,7 +2185,7 @@ def cmd_bench(script: Script, project: Project, args: list[str]) -> None:
     script.info(f"Benchmarking model: {model_name}")
     project.emit_python(
         script,
-        ["-m", "loupe_model.cli", "bench", "--model_name", model_name],
+        ["-m", "glo_model.cli", "bench", "--model_name", model_name],
         extra_args=extra,
     )
 
@@ -2946,7 +2946,7 @@ exit 0"""
 def show_help(all_projects: list[str]) -> None:
     """Print general help with projects and commands."""
     cli = cli_invocation()
-    print("Loupe Build System\n")
+    print("glo Build System\n")
 
     # List projects
     print("Projects:")
@@ -3751,14 +3751,14 @@ def main(workspace_root: Path | None = None) -> int:
 
     Args:
         workspace_root: Root directory of the workspace. If None, computed from
-            __file__ location (lib/build/loupe_build/cli.py -> workspace root).
+            __file__ location (lib/build/glo_build/cli.py -> workspace root).
     """
     if workspace_root is None:
         env_ws = os.environ.get("WORKSPACE")
         if env_ws:
             workspace_root = Path(env_ws)
         else:
-            # Fallback: compute from __file__: lib/build/loupe_build/cli.py -> workspace root
+            # Fallback: compute from __file__: lib/build/glo_build/cli.py -> workspace root
             workspace_root = Path(__file__).resolve().parent.parent.parent.parent
     set_workspace_root(workspace_root)
 
@@ -3791,7 +3791,7 @@ def main(workspace_root: Path | None = None) -> int:
 
     cli = cli_invocation()
     parser = argparse.ArgumentParser(
-        description="Lightweight build system for the Loupe monorepo",
+        description="Lightweight build system for glo",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Project patterns:
