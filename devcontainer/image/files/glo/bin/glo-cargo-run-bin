@@ -20,4 +20,9 @@ if [[ ! -x "$dest" ]]; then
     (cd "${RS_VENV}" && cargo bin --install)
 fi
 
+# cargo-run-bin >=0.4 installs to versioned subdirs (.bin/<rust>/<tool>/<ver>/bin/<tool>)
+if [[ ! -x "$dest" ]]; then
+    dest=$(find "${RS_VENV}/.bin" -name "$tool" -executable -type f 2>/dev/null | head -1)
+fi
+
 exec "$dest" "$@"
