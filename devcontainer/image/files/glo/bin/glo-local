@@ -141,11 +141,14 @@ ensure_rustup() {
 
 install_rs() {
     log "Installing Rust ${RUST_VERSION}"
+    local toolchain_bin
     ensure_rustup
     run rustup toolchain install "$RUST_VERSION" --profile minimal
     run rustup default "$RUST_VERSION"
     run rustup component add rust-analyzer rust-src rustfmt clippy --toolchain "$RUST_VERSION"
     run rustup target add wasm32-unknown-unknown --toolchain "$RUST_VERSION"
+    toolchain_bin="$(dirname "$(rustup which --toolchain "$RUST_VERSION" rustc)")"
+    export PATH="$toolchain_bin:$PATH"
     run rustup run "$RUST_VERSION" cargo install cargo-binstall --version "$CARGO_BINSTALL_VERSION" --locked
     run rustup run "$RUST_VERSION" cargo install cargo-run-bin --version "$CARGO_RUN_BIN_VERSION" --locked
 }
