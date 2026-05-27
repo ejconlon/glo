@@ -146,8 +146,8 @@ install_rs() {
     run rustup default "$RUST_VERSION"
     run rustup component add rust-analyzer rust-src rustfmt clippy --toolchain "$RUST_VERSION"
     run rustup target add wasm32-unknown-unknown --toolchain "$RUST_VERSION"
-    run cargo install cargo-binstall --version "$CARGO_BINSTALL_VERSION" --locked
-    run cargo install cargo-run-bin --version "$CARGO_RUN_BIN_VERSION" --locked
+    run rustup run "$RUST_VERSION" cargo install cargo-binstall --version "$CARGO_BINSTALL_VERSION" --locked
+    run rustup run "$RUST_VERSION" cargo install cargo-run-bin --version "$CARGO_RUN_BIN_VERSION" --locked
 }
 
 ensure_ghcup() {

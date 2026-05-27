@@ -46,10 +46,6 @@ fi
 export GLO_BUILD_CMD
 
 _ensure_cargo_on_path() {
-    if command -v cargo >/dev/null 2>&1; then
-        return
-    fi
-
     local cargo_path=""
     if command -v rustup >/dev/null 2>&1; then
         cargo_path="$(rustup which cargo 2>/dev/null || true)"
@@ -57,6 +53,10 @@ _ensure_cargo_on_path() {
             export PATH="${cargo_path%/*}:$PATH"
             return
         fi
+    fi
+
+    if command -v cargo >/dev/null 2>&1; then
+        return
     fi
 
     if [[ -x "$HOME/.cargo/bin/cargo" ]]; then

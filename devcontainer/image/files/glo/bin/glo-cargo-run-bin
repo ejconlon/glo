@@ -22,7 +22,17 @@ fi
 
 # cargo-run-bin >=0.4 installs to versioned subdirs (.bin/<rust>/<tool>/<ver>/bin/<tool>)
 if [[ ! -x "$dest" ]]; then
-    dest=$(find "${RS_VENV}/.bin" -name "$tool" -executable -type f 2>/dev/null | head -1)
+    for candidate in "${RS_VENV}/.bin"/*/"${tool}"/*/bin/"${tool}"; do
+        if [[ -x "$candidate" ]]; then
+            dest="$candidate"
+            break
+        fi
+    done
+fi
+
+if [[ ! -x "$dest" ]]; then
+    echo "${tool} was not installed under ${RS_VENV}/.bin" >&2
+    exit 1
 fi
 
 exec "$dest" "$@"
