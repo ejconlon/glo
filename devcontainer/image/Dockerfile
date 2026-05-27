@@ -196,29 +196,27 @@ RUN if [ "${ZK_ENABLED}" = "1" ]; then \
     zk --version; \
     fi
 
-# Install Node.js from official upstream binaries.
-# RHEL's packaged Node.js has a V8 bug causing SIGSEGV in interactive TUI apps
-# (e.g. gemini-cli Ink rendering). Upstream binaries don't have this issue.
-ARG NODE_VERSION=24.16.0
-ARG NODE_SHA256_X64=d804845d34eddc21dc1092b519d643ef40b1f58ec5dec5c22b1f4bd8fabde6c9
-ARG NODE_SHA256_ARM64=524659219d6a207a7400f2bde15d19ba060ffbe0d32a8643319ad67e3bb64c78
+# Install Node.js via nvm using the latest LTS line.
+ARG NVM_VERSION=0.40.3
+ENV NVM_DIR=/usr/local/nvm
 RUN set -eux; \
-    arch="$(uname -m)"; \
-    case "${arch}" in \
-        x86_64)  node_arch="x64";   checksum="${NODE_SHA256_X64}" ;; \
-        aarch64) node_arch="arm64"; checksum="${NODE_SHA256_ARM64}" ;; \
-        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"; \
-    echo "${checksum}  /tmp/node.tar.xz" | sha256sum -c -; \
-    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
-    rm -f /tmp/node.tar.xz; \
+    mkdir -p "${NVM_DIR}"; \
+    curl -fsSLo /tmp/install-nvm.sh "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh"; \
+    bash /tmp/install-nvm.sh; \
+    rm -f /tmp/install-nvm.sh; \
+    . "${NVM_DIR}/nvm.sh"; \
+    nvm install --lts; \
+    nvm alias default 'lts/*'; \
+    nvm use --silent --lts; \
+    chmod -R a+rX "${NVM_DIR}"; \
     node --version; \
     npm --version
 
 # Install PureScript tooling.
 ARG PURESCRIPT_ENABLED=1
 RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
+    . "${NVM_DIR}/nvm.sh"; \
+    nvm use --silent --lts; \
     npm install -g purescript spago purs-tidy; \
     fi
 
@@ -299,6 +297,8 @@ RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
 # Install other coding assistants
 ARG AGENTS_ENABLED=1
 RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
+    . "${NVM_DIR}/nvm.sh"; \
+    nvm use --silent --lts; \
     npm install -g \
       @openai/codex@0.133.0 \
       @google/gemini-cli@0.43.0 \

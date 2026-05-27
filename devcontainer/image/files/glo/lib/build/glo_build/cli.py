@@ -820,7 +820,8 @@ class Project:
         script.export("NODE_PATH", "$PS_NODE_MODULES")
         # Add tools to PATH (save original so we can restore later, not unset)
         script.raw("_SAVED_PATH=$PATH")
-        script.raw("export PATH=$PS_NODE_MODULES/.bin:$PATH")
+        self.emit_nvm_node_bin(script)
+        script.raw("export PATH=$PS_NODE_MODULES/.bin:$GLO_NODE_BIN:$PATH")
 
     def emit_python(
         self, script: Script, args: list[str], extra_args: list[str] | None = None
@@ -949,7 +950,34 @@ class Project:
         )
         script.export("NODE_PATH", "$TS_NODE_MODULES")
         script.raw("_SAVED_PATH=$PATH")
-        script.raw("export PATH=$TS_NODE_MODULES/.bin:$PATH")
+        self.emit_nvm_node_bin(script)
+        script.raw("export PATH=$TS_NODE_MODULES/.bin:$GLO_NODE_BIN:$PATH")
+
+    def emit_nvm_node_bin(self, script: Script) -> None:
+        """Resolve latest LTS Node via nvm and expose its bin directory."""
+        script.raw('export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"')
+        script.raw('_GLO_NOUNSET_WAS_ON=0')
+        script.raw('case $- in *u*) _GLO_NOUNSET_WAS_ON=1; set +u ;; esac')
+        script.raw(
+            'for _glo_nvm_sh in "$NVM_DIR/nvm.sh" '
+            '"/usr/local/nvm/nvm.sh" '
+            '"/opt/homebrew/opt/nvm/nvm.sh" '
+            '"/usr/local/opt/nvm/nvm.sh" '
+            '"/usr/share/nvm/init-nvm.sh" '
+            '"/usr/share/nvm/nvm.sh"; do'
+        )
+        script.raw(
+            '    if [ -s "$_glo_nvm_sh" ]; then . "$_glo_nvm_sh"; break; fi'
+        )
+        script.raw('done')
+        script.raw(
+            'if ! command -v nvm >/dev/null 2>&1; then '
+            'echo "[E] nvm not found; run glo-local ts" >&2; exit 1; fi'
+        )
+        script.raw('nvm use --silent --lts >/dev/null')
+        script.raw('GLO_NODE_BIN="$(dirname "$(command -v node)")"')
+        script.raw('if [ "$_GLO_NOUNSET_WAS_ON" -eq 1 ]; then set -u; fi')
+        script.raw('unset _GLO_NOUNSET_WAS_ON')
 
 
 # ---------------------------------------------------------------------------

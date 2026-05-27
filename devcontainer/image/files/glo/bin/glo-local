@@ -8,7 +8,7 @@ HLS_VERSION="2.14.0.0"
 RUST_VERSION="1.95.0"
 CARGO_BINSTALL_VERSION="1.19.1"
 CARGO_RUN_BIN_VERSION="1.7.5"
-NODE_VERSION="24.16.0"
+NODE_VERSION="latest LTS"
 
 DRY_RUN=0
 OS=""
@@ -29,7 +29,7 @@ Commands:
   py        Install Python/uv tooling
   rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src, wasm32 target, cargo-binstall, cargo-run-bin
   hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, ormolu, hlint via ghcup
-  ts        Install Node.js/npm tooling (Node ${NODE_VERSION} in the image)
+  ts,node   Install nvm-managed Node.js/npm tooling (${NODE_VERSION})
   ps        Install PureScript tooling
   notes     Install zk/sqlite tooling
   doctor    Print detected OS/arch and tool versions
@@ -43,6 +43,21 @@ EOF
 log() { printf '[I] %s\n' "$*" >&2; }
 warn() { printf '[W] %s\n' "$*" >&2; }
 die() { printf '[E] %s\n' "$*" >&2; exit 1; }
+
+without_nounset() {
+    local nounset_was_on=0
+    case $- in
+        *u*) nounset_was_on=1; set +u ;;
+    esac
+
+    "$@"
+    local status=$?
+
+    if [[ "$nounset_was_on" -eq 1 ]]; then
+        set -u
+    fi
+    return "$status"
+}
 
 run() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -208,18 +223,54 @@ install_hs() {
     link_latest_ghcup_tool hlint
 }
 
-install_ts() {
-    [[ "$TS_DONE" -eq 1 ]] && return
-    log "Installing TypeScript/Node tooling"
+source_nvm() {
+    if command -v nvm >/dev/null 2>&1; then
+        return 0
+    fi
+
+    export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+    local nvm_sh
+    for nvm_sh in \
+        "$NVM_DIR/nvm.sh" \
+        "/usr/local/nvm/nvm.sh" \
+        "/opt/homebrew/opt/nvm/nvm.sh" \
+        "/usr/local/opt/nvm/nvm.sh" \
+        "/usr/share/nvm/init-nvm.sh" \
+        "/usr/share/nvm/nvm.sh"; do
+        if [[ -s "$nvm_sh" ]]; then
+            # shellcheck source=/dev/null
+            without_nounset . "$nvm_sh"
+            command -v nvm >/dev/null 2>&1 && return 0
+        fi
+    done
+
+    return 1
+}
+
+ensure_nvm() {
+    source_nvm && return 0
+
     case "$OS" in
         arch)
-            pkg_install nodejs-lts-krypton npm
+            pkg_install nvm
             ;;
         macos)
-            pkg_install node@24
-            warn "If node is not on PATH, run: brew link --overwrite --force node@24"
+            pkg_install nvm
+            run mkdir -p "${NVM_DIR:-$HOME/.nvm}"
             ;;
     esac
+
+    [[ "$DRY_RUN" -eq 1 ]] && return 0
+    source_nvm || die "nvm was not found after package install. Restart your shell, then rerun 'glo-local ts'."
+}
+
+install_ts() {
+    [[ "$TS_DONE" -eq 1 ]] && return
+    log "Installing TypeScript/Node tooling via nvm (${NODE_VERSION})"
+    ensure_nvm
+    without_nounset run nvm install --lts
+    without_nounset run nvm alias default 'lts/*'
+    without_nounset run nvm use --lts
     TS_DONE=1
 }
 
@@ -308,7 +359,8 @@ doctor() {
     printf 'OS:   %s\n' "$OS"
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
-    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
+    source_nvm >/dev/null 2>&1 || true
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint nvm node npm purs spago purs-tidy zk; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else
@@ -351,7 +403,7 @@ main() {
         py) install_py ;;
         rs) install_rs ;;
         hs) install_hs ;;
-        ts) install_ts ;;
+        ts|node) install_ts ;;
         ps) install_ps ;;
         notes) install_notes ;;
         doctor) doctor ;;
