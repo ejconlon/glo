@@ -204,10 +204,12 @@ RUN set -eux; \
     curl -fsSLo /tmp/install-nvm.sh "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh"; \
     bash /tmp/install-nvm.sh; \
     rm -f /tmp/install-nvm.sh; \
+    set +u; \
     . "${NVM_DIR}/nvm.sh"; \
     nvm install --lts; \
     nvm alias default 'lts/*'; \
     nvm use --silent --lts; \
+    set -u; \
     chmod -R a+rX "${NVM_DIR}"; \
     node --version; \
     npm --version
