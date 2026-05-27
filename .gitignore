@@ -1,9 +1,5 @@
 /.devcontainer
 /.glo
-/bin
-/base
-/lib
 /base/.zk/notebook.db
-/justfile
 /.claude
 __pycache__/

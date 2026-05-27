@@ -98,11 +98,11 @@ RUN if [ "${RUST_ENABLED}" = "1" ]; then \
     chmod +x /tmp/rustup-init; \
     /tmp/rustup-init -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path; \
     rm -f /tmp/rustup-init; \
-    chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
     rustup component add rust-analyzer rust-src rustfmt clippy; \
     rustup target add wasm32-unknown-unknown; \
     cargo install cargo-binstall --version "${CARGO_BINSTALL_VERSION}" --locked; \
     cargo install cargo-run-bin --version "${CARGO_RUN_BIN_VERSION}" --locked; \
+    chmod -R a+rX $RUSTUP_HOME $CARGO_HOME; \
     rustc --version; \
     cargo --version; \
     cargo-binstall -V; \
@@ -264,7 +264,7 @@ RUN groupadd --gid 1000 user \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
     && chown -R user:user /home/user \
     && install -d -o user -g user \
-      /home/user/.local/bin /home/user/.cache /home/user/.config \
+      /home/user/.local/bin /home/user/.cache /home/user/.cargo /home/user/.config \
       /home/user/.claude /home/user/.codex /home/user/.gemini \
       /home/user/.config/opencode
 
@@ -328,6 +328,7 @@ USER user
 WORKDIR /home/user
 
 ENV UV_SYSTEM_PYTHON=1 \
+    CARGO_HOME=/home/user/.cargo \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
     PATH="/home/user/.local/bin:/opt/glo/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
 
