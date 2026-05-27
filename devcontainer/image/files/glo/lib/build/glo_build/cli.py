@@ -2053,7 +2053,7 @@ def cmd_dev_py(script: Script, project: Project, args: list[str]) -> None:
         extra_args = ["--port", port] + extra_args
     project.emit_python(
         script,
-        ["-m", "uvicorn", "glo_web.app:app", "--reload"],
+        ["-m", "uvicorn", "glo_web.app:app", "--host", "127.0.0.1", "--reload"],
         extra_args=extra_args,
     )
 
@@ -2083,7 +2083,7 @@ def cmd_serve_py(script: Script, project: Project, args: list[str]) -> None:
         extra_args = ["--port", port] + extra_args
     project.emit_python(
         script,
-        ["-m", "uvicorn", "glo_web.app:app", "--host", "0.0.0.0"],
+        ["-m", "uvicorn", "glo_web.app:app", "--host", "127.0.0.1"],
         extra_args=extra_args,
     )
 
@@ -2094,7 +2094,7 @@ def cmd_serve_ps(script: Script, project: Project, args: list[str]) -> None:
     del args  # unused
     script.info(f"Serving {project.path}")
     script.pushd(script.workspace_path(project.abs_path))
-    script.run(["python3", "-m", "http.server", "8080"])
+    script.run(["python3", "-m", "http.server", "--bind", "127.0.0.1", "8080"])
     script.popd()
 
 
