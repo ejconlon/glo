@@ -1975,36 +1975,30 @@ def cmd_docs(script: Script, project: Project, args: list[str]) -> None:
 
 @command("gen", "Generate code (runs gen.py if present)")
 def cmd_gen(script: Script, project: Project, args: list[str]) -> None:
-    """Generate code by running gen.py at project root if present.
-
-    Always uses /lib/gen/exe venv so gen.py can be used in non-Python projects.
-    """
+    """Generate code by running gen.py at project root if present."""
     del args  # unused
     gen_script = project.abs_path / "gen.py"
     if not gen_script.exists():
         script.info(f"No gen.py in {project.path}")
         return
     script.info(f"Generating code for {project.path}")
-    # Use /lib/gen/exe venv for all gen.py execution
-    gen_project = Project("/lib/gen/exe", project.workspace_root)
-    gen_project.emit_python(script, [script.workspace_path(gen_script)])
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    script.run(["python3", script.workspace_path(gen_script)])
 
 
 @command("dist", "Build distribution (runs dist.py if present)")
 def cmd_dist(script: Script, project: Project, args: list[str]) -> None:
-    """Build distribution by running dist.py at project root if present.
-
-    Always uses /lib/gen/exe venv so dist.py can be used in non-Python projects.
-    """
+    """Build distribution by running dist.py at project root if present."""
     del args  # unused
     dist_script = project.abs_path / "dist.py"
     if not dist_script.exists():
         script.info(f"No dist.py in {project.path}")
         return
     script.info(f"Building distribution for {project.path}")
-    # Use /lib/gen/exe venv for all dist.py execution
-    gen_project = Project("/lib/gen/exe", project.workspace_root)
-    gen_project.emit_python(script, [script.workspace_path(dist_script)])
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    script.run(["python3", script.workspace_path(dist_script)])
 
 
 @command(
@@ -3533,10 +3527,10 @@ def get_all_project_deps(
 ) -> dict[str, list[str]]:
     """Get dependencies for all projects. Returns dict: project -> list of parent projects."""
     # Build a map from relative path to project path for extra_deps lookup
-    # e.g., "gen/exe" -> "/lib/gen/exe", "core" -> "/lib/core"
+    # e.g., "comm/py" -> "/lib/comm/py", "core" -> "/lib/core"
     relpath_to_project: dict[str, str] = {}
     for proj in projects:
-        # Extract relative path from "/lib/..." (e.g., "/lib/gen/exe" -> "gen/exe")
+        # Extract relative path from "/lib/..." (e.g., "/lib/comm/py" -> "comm/py")
         if proj.startswith("/lib/"):
             rel_path = proj[5:]  # Remove "/lib/"
             relpath_to_project[rel_path] = proj

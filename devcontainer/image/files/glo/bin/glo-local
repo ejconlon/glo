@@ -6,6 +6,8 @@ CABAL_VERSION="3.16.1.0"
 STACK_VERSION="3.9.3"
 HLS_VERSION="2.14.0.0"
 RUST_VERSION="1.95.0"
+CARGO_BINSTALL_VERSION="1.19.1"
+CARGO_RUN_BIN_VERSION="1.7.5"
 NODE_VERSION="24.16.0"
 
 DRY_RUN=0
@@ -25,7 +27,7 @@ Commands:
   need      Install all except toolchains disabled in .devcontainer/*.json*
   base      Install common CLI tools
   py        Install Python/uv tooling
-  rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src
+  rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src, wasm32 target, cargo-binstall, cargo-run-bin
   hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, ormolu, hlint via ghcup
   ts        Install Node.js/npm tooling (Node ${NODE_VERSION} in the image)
   ps        Install PureScript tooling
@@ -143,6 +145,9 @@ install_rs() {
     run rustup toolchain install "$RUST_VERSION" --profile minimal
     run rustup default "$RUST_VERSION"
     run rustup component add rust-analyzer rust-src rustfmt clippy --toolchain "$RUST_VERSION"
+    run rustup target add wasm32-unknown-unknown --toolchain "$RUST_VERSION"
+    run cargo install cargo-binstall --version "$CARGO_BINSTALL_VERSION" --locked
+    run cargo install cargo-run-bin --version "$CARGO_RUN_BIN_VERSION" --locked
 }
 
 ensure_ghcup() {
@@ -303,7 +308,7 @@ doctor() {
     printf 'OS:   %s\n' "$OS"
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
-    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint node npm purs spago purs-tidy zk; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else

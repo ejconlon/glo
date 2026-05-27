@@ -36,9 +36,9 @@ MOCK_PROJECTS_WITH_NESTED = [
     "/lib/comm/py",
     "/lib/core",
     "/lib/edit",
-    "/lib/gen/exe",
-    "/lib/gen/ps",
-    "/lib/gen/py",
+    "/lib/tool/exe",
+    "/lib/tool/ps",
+    "/lib/tool/py",
     "/lib/ops",
     "/lib/persist/gen",
     "/lib/persist/py",
@@ -77,9 +77,9 @@ def setup_workspace(tmp_path: Path) -> None:
         "comm/gen": "meta",
         "comm/ps": "ps",
         "comm/py": "py",
-        "gen/exe": "meta",
-        "gen/ps": "ps",
-        "gen/py": "py",
+        "tool/exe": "meta",
+        "tool/ps": "ps",
+        "tool/py": "py",
         "persist/gen": "meta",
         "persist/py": "py",
     }
@@ -291,10 +291,10 @@ class TestSubprojectExpansion:
         assert set(result) == {"/lib/comm/gen", "/lib/comm/ps", "/lib/comm/py"}
 
     def test_lib_parent_with_multiple_children(self) -> None:
-        """Test /lib/gen expands to all gen child projects."""
-        result = expand_project_pattern("/lib/gen", MOCK_PROJECTS_WITH_NESTED)
+        """Test /lib/tool expands to all tool child projects."""
+        result = expand_project_pattern("/lib/tool", MOCK_PROJECTS_WITH_NESTED)
         assert result is not None
-        assert set(result) == {"/lib/gen/exe", "/lib/gen/ps", "/lib/gen/py"}
+        assert set(result) == {"/lib/tool/exe", "/lib/tool/ps", "/lib/tool/py"}
 
     def test_py_filter_under_parent(self) -> None:
         """Test /py/comm selects all py projects under /lib/comm."""

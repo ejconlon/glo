@@ -79,6 +79,8 @@ ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
 ARG RUST_VERSION=1.95.0
+ARG CARGO_BINSTALL_VERSION=1.19.1
+ARG CARGO_RUN_BIN_VERSION=1.7.5
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH
@@ -98,8 +100,13 @@ RUN if [ "${RUST_ENABLED}" = "1" ]; then \
     rm -f /tmp/rustup-init; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
     rustup component add rust-analyzer rust-src rustfmt clippy; \
+    rustup target add wasm32-unknown-unknown; \
+    cargo install cargo-binstall --version "${CARGO_BINSTALL_VERSION}" --locked; \
+    cargo install cargo-run-bin --version "${CARGO_RUN_BIN_VERSION}" --locked; \
     rustc --version; \
     cargo --version; \
+    cargo-binstall -V; \
+    cargo bin --version; \
     fi
 
 # Install just from GitHub releases.
