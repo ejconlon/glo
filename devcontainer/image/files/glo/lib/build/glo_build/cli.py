@@ -622,6 +622,7 @@ class TargetStep:
 
     target: str | None = None  # Reference to another target/command
     command: str | list[str] | None = None  # Raw bash command(s) to run
+    args: list[str] | None = None  # Args for target/command steps
 
 
 @dataclass(frozen=True)
@@ -704,6 +705,7 @@ def read_build_json(project_path: Path, rel_path: str) -> BuildConfig | None:
                     TargetStep(
                         target=step.get("target"),
                         command=step.get("command"),
+                        args=step.get("args"),
                     )
                 )
             targets[target_name] = target_steps
@@ -922,6 +924,11 @@ class Project:
         rs_venv = script.workspace_path(self.venv_path)
         script.export("CARGO_TARGET_DIR", f"{rs_venv}/target")
         script.export("RS_VENV", rs_venv)
+        script.raw(
+            'if command -v glo-cargo-run-bin >/dev/null 2>&1; then '
+            'export GLO_CARGO_RUN_BIN="$(command -v glo-cargo-run-bin)"; '
+            'else export GLO_CARGO_RUN_BIN="${WORKSPACE}/submodules/glo/devcontainer/image/files/glo/bin/glo-cargo-run-bin"; fi'
+        )
 
     def emit_cargo(self, script: Script, args: list[str]) -> None:
         """Emit a cargo command for Rust builds."""
@@ -1853,6 +1860,19 @@ def cmd_license_check_rs(script: Script, project: Project, args: list[str]) -> N
     script.info(f"License check for {project.path} (no-op)")
 
 
+@command("run-bin", "Run a project-pinned Rust binary", project_only=True, lang=Lang.Rust)
+def cmd_run_bin_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Run a binary declared in [package.metadata.bin] via the project venv."""
+    if not args:
+        script.raw("echo 'usage: run-bin <tool> [args...]' >&2; exit 2")
+        return
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_rs_env(script)
+    script.run(["${GLO_CARGO_RUN_BIN}"] + args)
+
+
 # ---------------------------------------------------------------------------
 # Common project commands - TypeScript
 # ---------------------------------------------------------------------------
@@ -1983,8 +2003,10 @@ def cmd_gen(script: Script, project: Project, args: list[str]) -> None:
         return
     script.info(f"Generating code for {project.path}")
     path = script.workspace_path(project.abs_path)
-    script.enter_project(path)
-    script.run(["python3", script.workspace_path(gen_script)])
+    is_new = script.enter_project(path)
+    if project.language == Lang.Rust and is_new:
+        project.emit_rs_env(script)
+    script.run(["python3", "-B", script.workspace_path(gen_script)])
 
 
 @command("dist", "Build distribution (runs dist.py if present)")
@@ -1997,8 +2019,10 @@ def cmd_dist(script: Script, project: Project, args: list[str]) -> None:
         return
     script.info(f"Building distribution for {project.path}")
     path = script.workspace_path(project.abs_path)
-    script.enter_project(path)
-    script.run(["python3", script.workspace_path(dist_script)])
+    is_new = script.enter_project(path)
+    if project.language == Lang.Rust and is_new:
+        project.emit_rs_env(script)
+    script.run(["python3", "-B", script.workspace_path(dist_script)])
 
 
 @command(
@@ -2291,9 +2315,9 @@ def build_task_graph(
     target_projects: list[str] = []
 
     for item in items:
-        if hasattr(item, "path"):  # ProjectItem
+        if isinstance(item, ProjectItem):
             target_projects.append(item.path)
-        else:  # CommandItem
+        else:
             cmd = COMMANDS.get(item.name)
             if cmd and cmd.root_only:
                 continue  # Root-only commands don't participate in parallel execution
@@ -3425,7 +3449,9 @@ def emit_custom_target(
 
     for i, step in enumerate(steps):
         is_last = i == len(steps) - 1
-        step_args = args if is_last else []
+        step_args = list(step.args or [])
+        if is_last:
+            step_args.extend(args)
 
         if step.target:
             # Reference to another target/command
@@ -3621,7 +3647,7 @@ def run_parallel(
     project_items: list[ProjectItem | CommandItem] = []
 
     for item in items:
-        if hasattr(item, "path"):  # ProjectItem
+        if isinstance(item, ProjectItem):
             project_items.append(item)
         else:
             cmd = COMMANDS.get(item.name)
@@ -3653,7 +3679,7 @@ def run_parallel(
         combined_lines.append("")
 
     # If no project commands, just handle root commands
-    if not any(hasattr(item, "name") for item in project_items):
+    if not any(isinstance(item, CommandItem) for item in project_items):
         if combined_lines:
             full_script = (
                 "#!/usr/bin/env bash\n"

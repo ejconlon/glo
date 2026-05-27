@@ -1,5 +1,5 @@
 /.devcontainer
 /.glo
-/base/.zk/notebook.db
+/lib/**/.bin/base/.zk/notebook.db
 /.claude
 __pycache__/

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tool="${1:-}"
+if [[ -z "$tool" ]]; then
+    echo "usage: glo-cargo-run-bin <tool> [args...]" >&2
+    exit 2
+fi
+shift
+
+if [[ -z "${RS_VENV:-}" ]]; then
+    echo "RS_VENV is required" >&2
+    exit 2
+fi
+
+mkdir -p "${RS_VENV}/bin"
+dest="${RS_VENV}/bin/${tool}"
+
+cleanup() {
+    rm -rf .bin
+}
+
+if [[ ! -x "$dest" ]]; then
+    exec 9>"${RS_VENV}/bin/.lock"
+    flock 9
+    trap cleanup EXIT
+
+    if [[ ! -x "$dest" ]]; then
+        rm -rf .bin
+        cargo bin --install
+        src="$(find .bin -path "*/bin/${tool}" -type f -perm -u+x | sort | tail -n 1)"
+        if [[ -z "$src" ]]; then
+            echo "cargo bin did not install ${tool}" >&2
+            exit 1
+        fi
+        install -m 755 "$src" "$dest"
+        rm -rf .bin
+    fi
+
+    trap - EXIT
+fi
+
+exec "$dest" "$@"

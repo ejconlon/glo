@@ -316,6 +316,7 @@ COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
+COPY --chmod=0755 files/glo/bin/glo-cargo-run-bin /opt/glo/bin/glo-cargo-run-bin
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/
 COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/
