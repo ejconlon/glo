@@ -4,7 +4,7 @@ project := file_name(workspace)
 
 # Build the devcontainer image
 build:
-  devcontainer build --label devcontainer.project={{project}} --workspace-folder {{workspace}}
+  devcontainer build --label devcontainer.project={{project}} --image-name devcontainer-{{project}} --workspace-folder {{workspace}}
 
 # Start the devcontainer (run in background)
 up name uniq:
