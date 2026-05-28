@@ -209,6 +209,7 @@ RUN set -eux; \
     nvm install --lts; \
     nvm alias default 'lts/*'; \
     nvm use --silent --lts; \
+    ln -sfn "$(dirname "$(dirname "$(command -v node)")")" "${NVM_DIR}/default"; \
     set -u; \
     chmod -R a+rX "${NVM_DIR}"; \
     node --version; \
@@ -333,6 +334,6 @@ WORKDIR /home/user
 ENV UV_SYSTEM_PYTHON=1 \
     CARGO_HOME=/home/user/.cargo \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PATH="/home/user/.local/bin:/opt/glo/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
+    PATH="/home/user/.local/bin:/opt/glo/bin:/usr/local/nvm/default/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
 
 CMD ["/bin/bash"]

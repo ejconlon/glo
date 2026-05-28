@@ -1,5 +1,5 @@
 {
-  "name": "datatone",
+  "name": "__PROJECT_NAME__",
   "build": {
     "dockerfile": "image/Dockerfile",
     "context": "image"
@@ -10,6 +10,7 @@
     "CODEX_HOME": "/home/user/.codex"
   },
   "mounts": [
+    "source=glo-0,target=/workspaces/__PROJECT_NAME__/.glo,type=volume",
     "source=claude-home-0,target=/home/user/.claude,type=volume",
     "source=codex-home-0,target=/home/user/.codex,type=volume",
     "source=gemini-home-0,target=/home/user/.gemini,type=volume",

@@ -23,7 +23,7 @@ echo "[I] Workspace: $WORKSPACE_DIR"
 mkdir -p "${WORKSPACE_DIR}/.devcontainer"
 
 # Generate devcontainer.json from template, substituting the project name
-sed "s/\"datatone\"/\"${PROJECT_NAME}\"/" \
+sed "s|__PROJECT_NAME__|${PROJECT_NAME}|g" \
     "${SCRIPT_DIR}/template/devcontainer.json" \
     > "${WORKSPACE_DIR}/.devcontainer/devcontainer.json"
 echo "[I] Generated .devcontainer/devcontainer.json"
