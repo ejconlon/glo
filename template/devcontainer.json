@@ -2,7 +2,10 @@
   "name": "__PROJECT_NAME__",
   "build": {
     "dockerfile": "image/Dockerfile",
-    "context": "image"
+    "context": "image",
+    "args": {
+      "PROJECT_NAME": "__PROJECT_NAME__"
+    }
   },
   "remoteUser": "user",
   "containerEnv": {

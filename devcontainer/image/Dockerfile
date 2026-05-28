@@ -49,7 +49,6 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         shellcheck \
         sqlite \
         strace \
-        sudo \
         tar \
         tmux \
         tree \
@@ -261,13 +260,15 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     fi
 
 # Setup home
+ARG PROJECT_NAME=workspace
 RUN groupadd --gid 1000 user \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
     && chown -R user:user /home/user \
     && install -d -o user -g user \
       /home/user/.local/bin /home/user/.cache /home/user/.cargo /home/user/.config \
       /home/user/.claude /home/user/.codex /home/user/.gemini \
-      /home/user/.config/opencode
+      /home/user/.config/opencode \
+      "/workspaces/${PROJECT_NAME}/.glo"
 
 # Install Claude CLI from official releases
 # To update Claude Code: change CLAUDE_VERSION, then run:
