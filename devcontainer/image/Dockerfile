@@ -267,7 +267,7 @@ RUN groupadd --gid 1000 user \
     && install -d -o user -g user \
       /home/user/.local/bin /home/user/.cache /home/user/.cargo /home/user/.config \
       /home/user/.claude /home/user/.codex /home/user/.gemini \
-      /home/user/.config/opencode \
+      /home/user/.config/opencode /home/user/.local/share/opencode \
       "/workspaces/${PROJECT_NAME}/.glo"
 
 # Install Claude CLI from official releases
@@ -311,7 +311,6 @@ RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
 
 # Install glo
 RUN mkdir -p /opt/glo/bin /opt/glo/lib
-COPY --chown=user:user files/config/opencode/opencode.json /home/user/.config/opencode/opencode.json
 COPY files/glo/README.md /opt/glo/README.md
 COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
 COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent

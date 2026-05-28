@@ -14,9 +14,10 @@
   },
   "mounts": [
     "source=__PROJECT_NAME__-glo-0,target=/workspaces/__PROJECT_NAME__/.glo,type=volume",
-    "source=__PROJECT_NAME__-claude-home-0,target=/home/user/.claude,type=volume",
-    "source=__PROJECT_NAME__-codex-home-0,target=/home/user/.codex,type=volume",
-    "source=__PROJECT_NAME__-gemini-home-0,target=/home/user/.gemini,type=volume",
-    "source=__PROJECT_NAME__-opencode-home-0,target=/home/user/.local/share/opencode,type=volume"
+    "source=__PROJECT_NAME__-opencode-home-0,target=/home/user/.local/share/opencode,type=volume",
+    "source=${localEnv:HOME}/.claude,target=/home/user/.claude,type=bind",
+    "source=${localEnv:HOME}/.codex,target=/home/user/.codex,type=bind",
+    "source=${localEnv:HOME}/.gemini,target=/home/user/.gemini,type=bind",
+    "source=${localEnv:HOME}/.config/opencode,target=/home/user/.config/opencode,type=bind"
   ]
 }
