@@ -905,12 +905,48 @@ class Project:
         script.export("CABAL_DIR", f"{hs_venv}/cabal")
         script.export("HS_VENV", hs_venv)
 
+    def emit_hs_cabal_setup(self, script: Script) -> None:
+        """Emit Cabal config and ensure the package index exists."""
+        self.emit_hs_env(script)
+        # Write cabal config with correct paths. cabal update auto-generates one
+        # with hardcoded absolute paths that break when the workspace moves.
+        script.raw('mkdir -p "${CABAL_DIR}"')
+        script.raw(
+            'printf "%s\\n"'
+            ' "repository hackage.haskell.org"'
+            ' "  url: http://hackage.haskell.org/"'
+            ' ""'
+            ' "remote-repo-cache: ${CABAL_DIR}/packages"'
+            ' "installdir: ${CABAL_DIR}/bin"'
+            ' "build-summary: ${CABAL_DIR}/logs/build.log"'
+            ' ""'
+            ' "install-dirs user"'
+            ' "  prefix: ${CABAL_DIR}"'
+            ' ""'
+            ' "jobs: \\$ncpus"'
+            ' > "${CABAL_DIR}/config"'
+        )
+        script.raw(
+            'if [ ! -f "${CABAL_DIR}/packages/hackage.haskell.org/01-index.tar" ]; then cabal update; fi'
+        )
+        script.raw(
+            'for _pkgdb in "${HS_VENV}"/store/ghc-*/package.db; do '
+            '[ -d "${_pkgdb}" ] || continue; '
+            'if ! ghc-pkg check --package-db="${_pkgdb}" >/tmp/glo-ghc-pkg-check 2>&1; then '
+            'echo "[W] Cabal store package DB is inconsistent; rebuilding ${HS_VENV}/store"; '
+            'cat /tmp/glo-ghc-pkg-check; '
+            'rm -rf "${HS_VENV}/store" "${HS_VENV}/dist-newstyle"; '
+            'break; '
+            'fi; '
+            'done'
+        )
+
     def emit_cabal(self, script: Script, args: list[str]) -> None:
         """Emit a cabal command for Haskell builds."""
         path = script.workspace_path(self.abs_path)
         is_new = script.enter_project(path)
         if is_new:
-            self.emit_hs_env(script)
+            self.emit_hs_cabal_setup(script)
         if args and args[0] != "update":
             script.run(
                 ["cabal", "--store-dir=${HS_VENV}/store"]
@@ -1637,28 +1673,7 @@ def cmd_venv_haskell(script: Script, project: Project, args: list[str]) -> None:
     """Update Haskell dependencies with cabal."""
     del args  # unused
     script.info(f"Updating dependencies for {project.path}")
-    project.emit_hs_env(script)
-    # Write cabal config with correct paths (cabal update auto-generates one
-    # with hardcoded absolute paths that break when the workspace moves)
-    script.raw('mkdir -p "${CABAL_DIR}"')
-    script.raw(
-        'printf "%s\\n"'
-        ' "repository hackage.haskell.org"'
-        ' "  url: http://hackage.haskell.org/"'
-        ' ""'
-        ' "remote-repo-cache: ${CABAL_DIR}/packages"'
-        ' "installdir: ${CABAL_DIR}/bin"'
-        ' "build-summary: ${CABAL_DIR}/logs/build.log"'
-        ' ""'
-        ' "install-dirs user"'
-        ' "  prefix: ${CABAL_DIR}"'
-        ' ""'
-        ' "jobs: \\$ncpus"'
-        ' > "${CABAL_DIR}/config"'
-    )
-    script.raw(
-        'if [ ! -f "${CABAL_DIR}/packages/hackage.haskell.org/01-index.tar" ]; then cabal update; fi'
-    )
+    project.emit_hs_cabal_setup(script)
     project.emit_cabal(script, ["build", "--only-dependencies"])
 
 
