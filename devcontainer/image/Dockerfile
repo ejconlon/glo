@@ -276,9 +276,9 @@ RUN groupadd --gid 1000 user \
 #   curl -fsSL "$gcs_bucket/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
 #   curl -fsSL "$gcs_bucket/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
 ARG CLAUDE_ENABLED=1
-ARG CLAUDE_VERSION=2.1.150
-ARG CLAUDE_SHA256_X64=6c086a0f5fbf684d4148bb69629268b4f5109498c1a7be757acf18c51fd04f4b
-ARG CLAUDE_SHA256_ARM64=2052949543ea076e2b5cda44c031b2b34fc303db98dc56ad6583b7e0a417ebeb
+ARG CLAUDE_VERSION=2.1.161
+ARG CLAUDE_SHA256_X64=1f6a22f387a3bce496b6d869389a35dffb5a69c97d9831833f3bd6dc0e6c6c28
+ARG CLAUDE_SHA256_ARM64=7dfa0a79a2fc9f332057cdc0302f808cba63df7b75e2ccb5a7c1ab62639804e3
 RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -304,9 +304,9 @@ RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @openai/codex@0.133.0 \
-      @google/gemini-cli@0.43.0 \
-      opencode-ai@1.15.10; \
+      @openai/codex@0.136.0 \
+      @google/gemini-cli@0.45.0 \
+      opencode-ai@1.15.13; \
     fi
 
 # Install glo
