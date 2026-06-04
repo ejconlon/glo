@@ -1,10 +1,13 @@
+set positional-arguments
+
 glo := "__GLO__"
 
 default:
     @just --list
 
-shell:
-    just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" shell
+shell *args:
+    #!/bin/bash
+    just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" shell "$@"
 
 precommit:
     bin/glo-build --filter=work precommit

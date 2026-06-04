@@ -1,3 +1,5 @@
+set positional-arguments
+
 workspace := env_var_or_default("GLO_WORKSPACE", parent_directory(justfile_directory()))
 export GLO_WORKSPACE := workspace
 project := file_name(workspace)
@@ -24,30 +26,41 @@ down-all:
 
 # Run a command in the devcontainer
 exec name uniq *args:
-  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}} --remote-env AGENT_NAME={{name}}-{{uniq}} {{args}}
+  #!/bin/bash
+  name="$1"
+  uniq="$2"
+  shift 2
+  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name="$name" --id-label devcontainer.uniq="$uniq" --workspace-folder {{workspace}} --remote-env AGENT_NAME="$name-$uniq" "$@"
 
 # Run command lifecycle
 lifecycle name *args:
   #!/bin/bash
+  name="$1"
+  shift
   uniq=$(printf '%04x%04x' $RANDOM $RANDOM)
-  (just up {{name}} "$uniq" && just exec {{name}} "$uniq" {{args}}); just down "$uniq"
+  (just up "$name" "$uniq" && just exec "$name" "$uniq" "$@"); just down "$uniq"
 
 # Run claude
-claude:
-  just lifecycle claude claude --dangerously-skip-permissions
+claude *args:
+  #!/bin/bash
+  just lifecycle claude claude --dangerously-skip-permissions "$@"
 
 # Run codex
-codex:
-  just lifecycle codex codex --dangerously-bypass-approvals-and-sandbox
+codex *args:
+  #!/bin/bash
+  just lifecycle codex codex --dangerously-bypass-approvals-and-sandbox "$@"
 
 # Run gemini
-gemini:
-  just lifecycle gemini gemini --yolo
+gemini *args:
+  #!/bin/bash
+  just lifecycle gemini gemini --yolo "$@"
 
 # Run opencode
-opencode:
-  just lifecycle opencode opencode
+opencode *args:
+  #!/bin/bash
+  just lifecycle opencode opencode "$@"
 
 # Run shell
-shell:
- just lifecycle shell bash
+shell *args:
+  #!/bin/bash
+  just lifecycle shell bash "$@"
