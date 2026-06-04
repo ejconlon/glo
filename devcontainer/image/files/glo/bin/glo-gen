@@ -10,9 +10,47 @@ _find_workspace() {
     echo "[E] No .git directory found from $PWD upward" >&2
     return 1
 }
-WORKSPACE_DIR="$(_find_workspace)"
 _GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TEMPLATES_DIR="${_GLO_BIN_DIR}/../templates"
+
+_types=()
+for _t in "${TEMPLATES_DIR}"/*/; do
+    [[ -d "$_t" ]] && _types+=("$(basename "$_t")")
+done
+
+usage() {
+    if [[ "${1:-stdout}" == "stderr" ]]; then
+        {
+            echo "glo-gen - generate a lib component from a template"
+            echo ""
+            echo "Usage: glo-gen TEMPLATE_NAME SUBPROJECT_NAME"
+            echo ""
+            echo "Templates: ${_types[*]}"
+            echo ""
+            echo "Output goes to lib/ in the workspace root."
+        } >&2
+    else
+        echo "glo-gen - generate a lib component from a template"
+        echo ""
+        echo "Usage: glo-gen TEMPLATE_NAME SUBPROJECT_NAME"
+        echo ""
+        echo "Templates: ${_types[*]}"
+        echo ""
+        echo "Output goes to lib/ in the workspace root."
+    fi
+}
+
+if [[ $# -eq 1 && ("$1" == "--help" || "$1" == "-h") ]]; then
+    usage
+    exit 0
+fi
+
+if [[ $# -ne 2 ]]; then
+    usage stderr
+    exit 1
+fi
+
+WORKSPACE_DIR="$(_find_workspace)"
 
 if [[ -x "${WORKSPACE_DIR}/.glo/build/bin/cookiecutter" ]]; then
     COOKIECUTTER="${WORKSPACE_DIR}/.glo/build/bin/cookiecutter"
@@ -24,30 +62,13 @@ else
     COOKIECUTTER="${WORKSPACE_DIR}/.glo/build/bin/cookiecutter"
 fi
 
-_types=()
-for _t in "${TEMPLATES_DIR}"/*/; do
-    [[ -d "$_t" ]] && _types+=("$(basename "$_t")")
-done
-
-usage() {
-    echo "glo-gen - generate a lib component from a template" >&2
-    echo "" >&2
-    echo "Usage: glo-gen <type> [cookiecutter-args]" >&2
-    echo "" >&2
-    echo "Types: ${_types[*]}" >&2
-    echo "" >&2
-    echo "Output goes to lib/ in the workspace root." >&2
-    exit 1
-}
-
-[[ $# -lt 1 || "$1" == "--help" || "$1" == "-h" ]] && usage
-
-TYPE="$1"; shift
+TYPE="$1"
+SUBPROJECT_NAME="$2"
 TEMPLATE="${TEMPLATES_DIR}/${TYPE}"
 
 if [[ ! -d "$TEMPLATE" ]]; then
-    echo "[E] Unknown type '${TYPE}'. Available: ${_types[*]}" >&2
+    echo "[E] Unknown template '${TYPE}'. Available: ${_types[*]}" >&2
     exit 1
 fi
 
-exec "$COOKIECUTTER" "$TEMPLATE" --output-dir "${WORKSPACE_DIR}/lib" "$@"
+exec "$COOKIECUTTER" "$TEMPLATE" --output-dir "${WORKSPACE_DIR}/lib" --no-input "name=${SUBPROJECT_NAME}"

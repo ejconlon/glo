@@ -32,11 +32,11 @@ step "Bootstrap"
 
 # --- Generate projects ---
 step "Generate projects"
-bin/glo-gen meta --no-input name=test_meta
-bin/glo-gen rs   --no-input name=test_rs
-bin/glo-gen hs   --no-input name=test_hs
-bin/glo-gen py   --no-input name=test_py
-bin/glo-gen ts   --no-input name=test_ts
+bin/glo-gen meta test_meta
+bin/glo-gen rs   test_rs
+bin/glo-gen hs   test_hs
+bin/glo-gen py   test_py
+bin/glo-gen ts   test_ts
 [[ -f lib/test_meta/build.json ]] && ok "meta scaffolded"
 [[ -f lib/test_rs/Cargo.toml ]]   && ok "rs scaffolded"
 [[ -f lib/test_hs/test_hs.cabal ]] && ok "hs scaffolded"

@@ -182,9 +182,9 @@ Language isolation:
 Use `glo-gen` to create a new `lib/` component from templates.
 
 ```sh
-glo-gen <type> [cookiecutter-args]
-glo-gen py --no-input name=my_package
-glo-gen rs --no-input name=my_crate
+glo-gen TEMPLATE_NAME SUBPROJECT_NAME
+glo-gen py my_package
+glo-gen rs my_crate
 ```
 
 Template types:
