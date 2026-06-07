@@ -11,6 +11,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         bzip2 \
         ca-certificates \
         chafa \
+        curl \
         file \
         findutils \
         gcc \
@@ -259,11 +260,32 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     ln -sf /usr/local/.ghcup/bin/hlint-* /usr/local/bin/hlint; \
     fi
 
+# Install wasm32-wasi GHC toolchain separately so native ghc/cabal remain the defaults.
+# The wasm toolchain is installed by ghc-wasm-meta and provides wasm32-wasi-ghc,
+# wasm32-wasi-cabal, wasmtime, binaryen, and WASI SDK tools.
+ARG WASM_GHC_ENABLED=1
+ARG WASM_GHC_FLAVOUR=9.14
+ARG WASM_GHC_META_REF=master
+ENV GHC_WASM_PREFIX=/opt/ghc-wasm
+RUN if [ "${WASM_GHC_ENABLED}" = "1" ]; then \
+    set -eux; \
+    git clone --depth 1 --branch "${WASM_GHC_META_REF}" https://github.com/haskell-wasm/ghc-wasm-meta.git /tmp/ghc-wasm-meta; \
+    FLAVOUR="${WASM_GHC_FLAVOUR}" PREFIX="${GHC_WASM_PREFIX}" /tmp/ghc-wasm-meta/setup.sh; \
+    rm -rf /tmp/ghc-wasm-meta; \
+    chmod -R a+rX "${GHC_WASM_PREFIX}"; \
+    chmod -R a+rwX "${GHC_WASM_PREFIX}/.cabal"; \
+    . "${GHC_WASM_PREFIX}/env"; \
+    wasm32-wasi-ghc --version; \
+    wasm32-wasi-cabal --version; \
+    wasmtime --version; \
+    fi
+
 # Setup home
 ARG PROJECT_NAME=workspace
 RUN groupadd --gid 1000 user \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
     && chown -R user:user /home/user \
+    && if [ -d /usr/local/.ghcup/logs ]; then chmod -R a+rwX /usr/local/.ghcup/logs; fi \
     && install -d -o user -g user \
       /home/user/.local/bin /home/user/.cache /home/user/.cargo /home/user/.config \
       /home/user/.claude /home/user/.codex /home/user/.gemini \
@@ -334,6 +356,7 @@ WORKDIR /home/user
 ENV UV_SYSTEM_PYTHON=1 \
     CARGO_HOME=/home/user/.cargo \
     PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PATH="/home/user/.local/bin:/opt/glo/bin:/usr/local/nvm/default/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
+    NODE_PATH="/opt/ghc-wasm/nodejs/lib/node_modules" \
+    PATH="/home/user/.local/bin:/opt/glo/bin:/opt/ghc-wasm/wasm-run/bin:/opt/ghc-wasm/wasm32-wasi-cabal/bin:/opt/ghc-wasm/wasmtime/bin:/opt/ghc-wasm/binaryen/bin:/opt/ghc-wasm/wasi-sdk/bin:/opt/ghc-wasm/wasm32-wasi-ghc/bin:/usr/local/nvm/default/bin:/usr/local/.ghcup/bin:/usr/local/ghcup/bin:/usr/local/cargo/bin:/usr/local/bin:${PATH}"
 
 CMD ["/bin/bash"]
