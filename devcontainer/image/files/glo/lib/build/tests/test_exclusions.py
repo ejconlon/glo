@@ -181,7 +181,7 @@ class TestTargetExclusions:
     def test_get_all_target_names_meta(self) -> None:
         """Test get_all_target_names for meta-command."""
         result = get_all_target_names("precommit")
-        # precommit -> format, lint, test
+        # precommit -> gen, format, lint, test
         # test -> typecheck, unit
         expected = {"precommit", "gen", "format", "lint", "test", "typecheck", "unit"}
         assert result == expected

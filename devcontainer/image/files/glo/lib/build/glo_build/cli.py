@@ -1623,8 +1623,8 @@ def cmd_repl_ps(script: Script, project: Project, args: list[str]) -> None:
 meta_command("test", "Run all tests (typecheck + unit)", ["typecheck", "unit"])
 meta_command(
     "precommit",
-    "Sync dependencies, run gen, and all checks (format + lint + test)",
-    ["venv", "gen", "format", "lint", "test"],
+    "Run gen and all checks (format + lint + test)",
+    ["gen", "format", "lint", "test"],
 )
 meta_command(
     "all",
