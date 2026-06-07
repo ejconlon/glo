@@ -1802,6 +1802,13 @@ def cmd_unit_haskell(script: Script, project: Project, args: list[str]) -> None:
     project.emit_cabal(script, ["test", "--test-show-details=direct"])
 
 
+@command("doc", "Generate documentation", lang=Lang.Haskell)
+def cmd_doc_haskell(script: Script, project: Project, args: list[str]) -> None:
+    """Generate Haskell documentation with cabal haddock."""
+    script.info(f"Generating docs for {project.path}")
+    project.emit_cabal(script, ["haddock"] + args)
+
+
 @command("clean", "Clean generated files and caches", lang=Lang.Haskell)
 def cmd_clean_haskell(script: Script, project: Project, args: list[str]) -> None:
     """Clean Haskell build artifacts."""
@@ -2023,12 +2030,11 @@ def cmd_cli(script: Script, project: Project, args: list[str]) -> None:
     project.emit_python(script, ["-m", f"{project.package_name}.cli"], extra_args=args)
 
 
-@command("docs", "Generate documentation")
-def cmd_docs(script: Script, project: Project, args: list[str]) -> None:
-    """Generate documentation."""
+@command("doc", "Generate documentation")
+def cmd_doc(script: Script, project: Project, args: list[str]) -> None:
+    """Generate documentation (no-op unless the language has a handler)."""
     del args  # unused
-    script.info(f"Generating docs for {project.path}")
-    script.warn("Docs generation not yet implemented")
+    script.info(f"Generating docs for {project.path} (no-op)")
 
 
 # ---------------------------------------------------------------------------
