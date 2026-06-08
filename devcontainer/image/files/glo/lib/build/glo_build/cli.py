@@ -927,7 +927,9 @@ class Project:
             ' > "${CABAL_DIR}/config"'
         )
         script.raw(
-            'if [ ! -f "${CABAL_DIR}/packages/hackage.haskell.org/01-index.tar" ]; then cabal update; fi'
+            'if [ ! -f "${CABAL_DIR}/packages/hackage.haskell.org/01-index.tar" ]; then '
+            'cabal --config-file=${CABAL_DIR}/config update; '
+            'fi'
         )
         script.raw(
             'for _pkgdb in "${HS_VENV}"/store/ghc-*/package.db; do '
@@ -949,12 +951,16 @@ class Project:
             self.emit_hs_cabal_setup(script)
         if args and args[0] != "update":
             script.run(
-                ["cabal", "--store-dir=${HS_VENV}/store"]
+                [
+                    "cabal",
+                    "--config-file=${CABAL_DIR}/config",
+                    "--store-dir=${HS_VENV}/store",
+                ]
                 + args
                 + ["--builddir=${HS_VENV}/dist-newstyle"]
             )
         else:
-            script.run(["cabal"] + args)
+            script.run(["cabal", "--config-file=${CABAL_DIR}/config"] + args)
 
     def emit_rs_env(self, script: Script) -> None:
         """Emit Rust environment setup, routing build artifacts into the venv."""
@@ -1727,7 +1733,7 @@ def _install_hs_executables(script: Script, project: Project) -> None:
     script.raw("mkdir -p ${HS_VENV}/bin")
     for name in exe_names:
         script.raw(
-            f"install -m 755 $(cabal --store-dir=${{HS_VENV}}/store list-bin {name}"
+            f"install -m 755 $(cabal --config-file=${{CABAL_DIR}}/config --store-dir=${{HS_VENV}}/store list-bin {name}"
             f" --builddir=${{HS_VENV}}/dist-newstyle) ${{HS_VENV}}/bin/{name}"
         )
 
