@@ -15,7 +15,8 @@
   "mounts": [
     "source=${localWorkspaceFolder}/.git,target=/workspaces/__PROJECT_NAME__/.git,type=bind,readonly",
     "source=__PROJECT_NAME__-glo-0,target=/workspaces/__PROJECT_NAME__/.glo,type=volume",
-    "source=__PROJECT_NAME__-opencode-home-0,target=/home/user/.local/share/opencode,type=volume",
+    "source=__PROJECT_NAME__-xdg-config-0,target=/home/user/.config,type=volume",
+    "source=__PROJECT_NAME__-xdg-share-0,target=/home/user/.local/share,type=volume",
     "source=${localEnv:HOME}/.claude,target=/home/user/.claude,type=bind",
     "source=${localEnv:HOME}/.codex,target=/home/user/.codex,type=bind",
     "source=${localEnv:HOME}/.gemini,target=/home/user/.gemini,type=bind",

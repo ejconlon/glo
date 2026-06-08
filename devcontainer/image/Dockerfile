@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         iproute \
         lsof \
         make \
+        nano \
         ncurses \
         neovim \
         openssh-clients \
@@ -54,6 +55,8 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         tmux \
         tree \
         time \
+        vim-enhanced \
+        vim-minimal \
         wget \
         whois \
         which \
@@ -287,10 +290,13 @@ RUN groupadd --gid 1000 user \
     && chown -R user:user /home/user \
     && if [ -d /usr/local/.ghcup/logs ]; then chmod -R a+rwX /usr/local/.ghcup/logs; fi \
     && install -d -o user -g user \
-      /home/user/.local/bin /home/user/.cache /home/user/.cargo /home/user/.config \
+      /home/user/.local/bin /home/user/.local/share /home/user/.local/state \
+      /home/user/.cache /home/user/.cargo /home/user/.config \
       /home/user/.claude /home/user/.codex /home/user/.gemini \
       /home/user/.config/opencode /home/user/.local/share/opencode \
       "/workspaces/${PROJECT_NAME}/.glo"
+
+VOLUME ["/home/user/.config", "/home/user/.local/share"]
 
 # Install Claude CLI from official releases
 # To update Claude Code: change CLAUDE_VERSION, then run:
