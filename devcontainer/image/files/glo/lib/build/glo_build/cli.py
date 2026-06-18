@@ -946,9 +946,8 @@ class Project:
     def emit_cabal(self, script: Script, args: list[str]) -> None:
         """Emit a cabal command for Haskell builds."""
         path = script.workspace_path(self.abs_path)
-        is_new = script.enter_project(path)
-        if is_new:
-            self.emit_hs_cabal_setup(script)
+        script.enter_project(path)
+        self.emit_hs_cabal_setup(script)
         if args and args[0] != "update":
             script.run(
                 [
