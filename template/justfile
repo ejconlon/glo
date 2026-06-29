@@ -13,10 +13,6 @@ opencode *args:
     #!/bin/bash
     just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" opencode "$@"
 
-opencode-serve *args:
-    #!/bin/bash
-    just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" opencode-serve "$@"
-
 precommit:
     bin/glo-build --filter=work precommit
     bin/glo-notes precommit
