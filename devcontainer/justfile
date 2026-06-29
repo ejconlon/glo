@@ -63,7 +63,7 @@ opencode *args:
 # Run opencode serve and print the Docker-published host port
 opencode-serve *args:
   #!/bin/bash
-  {{justfile_directory()}}/image/files/glo/bin/glo-opencode-serve --workspace "{{workspace}}" "$@"
+  {{justfile_directory()}}/image/files/glo/bin/glo-opencode serve --workspace "{{workspace}}" "$@"
 
 # Run shell
 shell *args:

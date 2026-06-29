@@ -23,10 +23,14 @@ echo "[I] Workspace: $WORKSPACE_DIR"
 mkdir -p "${WORKSPACE_DIR}/.devcontainer"
 
 # Generate devcontainer.json from template, substituting the project name
-sed "s|__PROJECT_NAME__|${PROJECT_NAME}|g" \
-    "${SCRIPT_DIR}/template/devcontainer.json" \
-    > "${WORKSPACE_DIR}/.devcontainer/devcontainer.json"
-echo "[I] Generated .devcontainer/devcontainer.json"
+if [[ ! -e "${WORKSPACE_DIR}/.devcontainer/devcontainer.json" ]]; then
+    sed "s|__PROJECT_NAME__|${PROJECT_NAME}|g" \
+        "${SCRIPT_DIR}/template/devcontainer.json" \
+        > "${WORKSPACE_DIR}/.devcontainer/devcontainer.json"
+    echo "[I] Generated .devcontainer/devcontainer.json"
+else
+    echo "[I] .devcontainer/devcontainer.json already exists, skipping"
+fi
 
 # Symlink image directory using a relative path for portability
 if [[ ! -e "${WORKSPACE_DIR}/.devcontainer/image" ]]; then
