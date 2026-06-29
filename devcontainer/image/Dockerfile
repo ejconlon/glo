@@ -75,43 +75,6 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
 RUN python3 -m pip install --no-cache-dir --upgrade pip \
     && python3 -m pip install --no-cache-dir uv
 
-# Install rustup and Rust toolchain from GitHub releases with SHA256 verification
-# We need Rust 1.85.0+ for features required by tantivy 0.25.0
-ARG RUST_ENABLED=1
-ARG RUSTUP_VERSION=1.29.0
-ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
-ARG RUST_VERSION=1.95.0
-ARG CARGO_BINSTALL_VERSION=1.19.1
-ARG CARGO_RUN_BIN_VERSION=1.7.5
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
-RUN if [ "${RUST_ENABLED}" = "1" ]; then \
-    set -eux; \
-    arch="$(uname -m)"; \
-    case "${arch}" in \
-        x86_64) rustup_arch="x86_64"; checksum="${RUSTUP_SHA256_X64}" ;; \
-        aarch64) rustup_arch="aarch64"; checksum="${RUSTUP_SHA256_ARM64}" ;; \
-        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
-    esac; \
-    url="https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${rustup_arch}-unknown-linux-gnu/rustup-init"; \
-    curl -fsSLo /tmp/rustup-init "${url}"; \
-    echo "${checksum}  /tmp/rustup-init" | sha256sum -c -; \
-    chmod +x /tmp/rustup-init; \
-    /tmp/rustup-init -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path; \
-    rm -f /tmp/rustup-init; \
-    rustup component add rust-analyzer rust-src rustfmt clippy; \
-    rustup target add wasm32-unknown-unknown; \
-    cargo install cargo-binstall --version "${CARGO_BINSTALL_VERSION}" --locked; \
-    cargo install cargo-run-bin --version "${CARGO_RUN_BIN_VERSION}" --locked; \
-    chmod -R a+rX $RUSTUP_HOME $CARGO_HOME; \
-    rustc --version; \
-    cargo --version; \
-    cargo-binstall -V; \
-    cargo bin --version; \
-    fi
-
 # Install just from GitHub releases.
 ARG JUST_ENABLED=1
 ARG JUST_VERSION=1.43.0
@@ -218,8 +181,44 @@ RUN set -eux; \
     node --version; \
     npm --version
 
+# Install rustup and Rust toolchain from GitHub releases with SHA256 verification
+ARG RUST_ENABLED=0
+ARG RUSTUP_VERSION=1.29.0
+ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
+ARG RUST_VERSION=1.95.0
+ARG CARGO_BINSTALL_VERSION=1.19.1
+ARG CARGO_RUN_BIN_VERSION=1.7.5
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN if [ "${RUST_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) rustup_arch="x86_64"; checksum="${RUSTUP_SHA256_X64}" ;; \
+        aarch64) rustup_arch="aarch64"; checksum="${RUSTUP_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    url="https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${rustup_arch}-unknown-linux-gnu/rustup-init"; \
+    curl -fsSLo /tmp/rustup-init "${url}"; \
+    echo "${checksum}  /tmp/rustup-init" | sha256sum -c -; \
+    chmod +x /tmp/rustup-init; \
+    /tmp/rustup-init -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path; \
+    rm -f /tmp/rustup-init; \
+    rustup component add rust-analyzer rust-src rustfmt clippy; \
+    rustup target add wasm32-unknown-unknown; \
+    cargo install cargo-binstall --version "${CARGO_BINSTALL_VERSION}" --locked; \
+    cargo install cargo-run-bin --version "${CARGO_RUN_BIN_VERSION}" --locked; \
+    chmod -R a+rX $RUSTUP_HOME $CARGO_HOME; \
+    rustc --version; \
+    cargo --version; \
+    cargo-binstall -V; \
+    cargo bin --version; \
+    fi
+
 # Install PureScript tooling.
-ARG PURESCRIPT_ENABLED=1
+ARG PURESCRIPT_ENABLED=0
 RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
@@ -229,7 +228,7 @@ RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
 # Install ghcup and Haskell toolchain (ghc, cabal, stack, hls, ormolu, hlint)
 # To update ghcup: change GHCUP_VERSION, then get SHA256s from:
 #   https://downloads.haskell.org/~ghcup/<version>/SHA256SUMS
-ARG HASKELL_ENABLED=1
+ARG HASKELL_ENABLED=0
 ARG GHCUP_VERSION=0.2.2.0
 ARG GHCUP_SHA256_X64=29c7ed853a0525e6d787697ebb12b0a76f2ab0c5aca3e0b23e5ba75279ddd19d
 ARG GHCUP_SHA256_ARM64=67d50a72e33454d566c9e40db2d64b289ce3deaaee781633dc4a25e4a696a319
@@ -266,7 +265,7 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
 # Install wasm32-wasi GHC toolchain separately so native ghc/cabal remain the defaults.
 # The wasm toolchain is installed by ghc-wasm-meta and provides wasm32-wasi-ghc,
 # wasm32-wasi-cabal, wasmtime, binaryen, and WASI SDK tools.
-ARG WASM_GHC_ENABLED=1
+ARG WASM_GHC_ENABLED=0
 ARG WASM_GHC_FLAVOUR=9.14
 ARG WASM_GHC_META_REF=master
 ENV GHC_WASM_PREFIX=/opt/ghc-wasm
@@ -303,7 +302,7 @@ VOLUME ["/home/user/.config", "/home/user/.local/share"]
 #   gcs_bucket="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
 #   curl -fsSL "$gcs_bucket/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
 #   curl -fsSL "$gcs_bucket/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
-ARG CLAUDE_ENABLED=1
+ARG CLAUDE_ENABLED=0
 ARG CLAUDE_VERSION=2.1.170
 ARG CLAUDE_SHA256_X64=849e007277a0442ab27570d3e3d6d43787507946590e8dd1947e5a39b7081f9e
 ARG CLAUDE_SHA256_ARM64=1bb9d032440a75532f7dd4cafbc687f220aaf16c63eba17e192dfbec2f04bd25
@@ -326,15 +325,31 @@ RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
     rm -rf "$binary_path"; \
     fi
 
-# Install other coding assistants
-ARG AGENTS_ENABLED=1
-RUN if [ "${AGENTS_ENABLED}" = "1" ]; then \
+# Install gemini
+ARG GEMINI_ENABLED=0
+RUN if [ "${GEMINI_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @openai/codex@0.139.0 \
-      @google/gemini-cli@0.46.0 \
-      opencode-ai@1.17.3; \
+      @google/gemini-cli@0.49.0; \
+    fi
+
+# Install codex
+ARG CODEX_ENABLED=0
+RUN if [ "${CODEX_ENABLED}" = "1" ]; then \
+    . "${NVM_DIR}/nvm.sh"; \
+    nvm use --silent --lts; \
+    npm install -g \
+      @openai/codex@0.142.4; \
+    fi
+
+# Install opencode
+ARG OPENCODE_ENABLED=0
+RUN if [ "${OPENCODE_ENABLED}" = "1" ]; then \
+    . "${NVM_DIR}/nvm.sh"; \
+    nvm use --silent --lts; \
+    npm install -g \
+      opencode-ai@1.17.11; \
     fi
 
 # Install glo
@@ -347,6 +362,7 @@ COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
+COPY --chmod=0755 files/glo/bin/glo-opencode-serve /opt/glo/bin/glo-opencode-serve
 COPY --chmod=0755 files/glo/bin/glo-cargo-run-bin /opt/glo/bin/glo-cargo-run-bin
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/

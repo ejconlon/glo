@@ -8,6 +8,14 @@
     }
   },
   "remoteUser": "user",
+  "runArgs": ["-p", "127.0.0.1::4096"],
+  "forwardPorts": [4096],
+  "portsAttributes": {
+    "4096": {
+      "label": "opencode",
+      "onAutoForward": "silent"
+    }
+  },
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/user/.claude",
     "CODEX_HOME": "/home/user/.codex"

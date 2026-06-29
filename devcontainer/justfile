@@ -60,6 +60,11 @@ opencode *args:
   #!/bin/bash
   just lifecycle opencode opencode "$@"
 
+# Run opencode serve and print the Docker-published host port
+opencode-serve *args:
+  #!/bin/bash
+  {{justfile_directory()}}/image/files/glo/bin/glo-opencode-serve --workspace "{{workspace}}" "$@"
+
 # Run shell
 shell *args:
   #!/bin/bash
