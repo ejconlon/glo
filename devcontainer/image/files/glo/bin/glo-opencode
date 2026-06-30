@@ -10,6 +10,12 @@ Commands:
       Start opencode serve in the glo devcontainer and print the
       Docker-published host port as OPENCODE_HOST_PORT=<port>.
 
+  connect [--workspace PATH] [--container ID]
+      Attach the local opencode TUI to the workspace's devcontainer server.
+      Reuses an existing healthy server and continues the most recently
+      updated root session when possible. --container attaches to a specific
+      container.
+
   list [--workspace PATH] [--all]
       List opencode devcontainers and their published ports.
 
@@ -104,6 +110,10 @@ container_ids() {
     docker ps "${filters[@]}" --format '{{.ID}}'
 }
 
+all_container_ids() {
+    docker ps --filter "label=devcontainer.name=opencode" --format '{{.ID}}'
+}
+
 host_port() {
     local cid=$1
     docker port "$cid" "$container_port/tcp" 2>/dev/null \
@@ -114,6 +124,41 @@ host_port() {
 server_healthy() {
     local port=$1
     curl -fsS "http://127.0.0.1:${port}/global/health" >/dev/null 2>&1
+}
+
+urlencode() {
+    jq -rn --arg value "$1" '$value | @uri'
+}
+
+healthy_server() {
+    local cid port
+    while IFS= read -r cid; do
+        [[ -n "$cid" ]] || continue
+        port=$(host_port "$cid")
+        if [[ -n "$port" ]] && server_healthy "$port"; then
+            printf '%s\t%s\n' "$cid" "$port"
+            return 0
+        fi
+    done < <(container_ids)
+    return 1
+}
+
+single_healthy_server() {
+    local cid port found= count=0
+    while IFS= read -r cid; do
+        [[ -n "$cid" ]] || continue
+        port=$(host_port "$cid")
+        if [[ -n "$port" ]] && server_healthy "$port"; then
+            found=$(printf '%s\t%s' "$cid" "$port")
+            count=$((count + 1))
+        fi
+    done < <(all_container_ids)
+
+    if [[ "$count" -eq 1 ]]; then
+        printf '%s\n' "$found"
+        return 0
+    fi
+    return 1
 }
 
 serve() {
@@ -188,6 +233,53 @@ list() {
     done < <(container_ids)
 }
 
+connect() {
+    local server cid port session_id encoded_dir sessions_json
+    if [[ -n "$container" ]]; then
+        cid=$container
+        port=$(host_port "$cid")
+        if [[ -z "$port" ]]; then
+            echo "Container $cid does not publish opencode port $container_port" >&2
+            return 1
+        fi
+        if ! server_healthy "$port"; then
+            echo "Container $cid is not serving opencode on host port $port" >&2
+            return 1
+        fi
+    elif server=$(healthy_server); then
+        cid=${server%%$'\t'*}
+        port=${server##*$'\t'}
+    elif server=$(single_healthy_server); then
+        cid=${server%%$'\t'*}
+        port=${server##*$'\t'}
+    else
+        echo "No healthy opencode server found." >&2
+        return 1
+    fi
+
+    if [[ -z "${port:-}" ]]; then
+        echo "Could not determine opencode host port" >&2
+        return 1
+    fi
+
+    encoded_dir=$(urlencode "$container_workspace")
+    sessions_json=$(curl -fsS "http://127.0.0.1:${port}/session?directory=${encoded_dir}" 2>/dev/null || true)
+    if [[ -n "$sessions_json" ]]; then
+        session_id=$(jq -r '
+            def updated: .time.updated // 0;
+            (map(select(.parentID == null)) | sort_by(updated) | last // empty).id
+            // (sort_by(updated) | last // empty).id
+            // empty
+        ' <<<"$sessions_json")
+    fi
+
+    export OPENCODE_CONTAINER_ID=${cid:-}
+    if [[ -n "$session_id" ]]; then
+        exec opencode attach "http://127.0.0.1:${port}" --dir "$container_workspace" --session "$session_id"
+    fi
+    exec opencode attach "http://127.0.0.1:${port}" --dir "$container_workspace"
+}
+
 roots() {
     echo "OPENCODE_HOST_WORKSPACE=$workspace"
     echo "OPENCODE_CONTAINER_WORKSPACE=$container_workspace"
@@ -209,6 +301,7 @@ kill_containers() {
 
 case "$command" in
     serve) serve ;;
+    connect) connect ;;
     list) list ;;
     roots) roots ;;
     kill) kill_containers ;;
