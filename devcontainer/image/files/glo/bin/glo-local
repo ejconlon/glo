@@ -11,6 +11,9 @@ RUST_VERSION="1.95.0"
 CARGO_BINSTALL_VERSION="1.19.1"
 CARGO_RUN_BIN_VERSION="1.7.5"
 NODE_VERSION="latest LTS"
+ROCQ_VERSION="9.0.0"
+ROCQ_OCAML_VERSION="5.3.0"
+VSROCQ_LANGUAGE_SERVER_PACKAGE="vsrocq-language-server"
 
 DRY_RUN=0
 OS=""
@@ -25,13 +28,14 @@ glo-local - install local host dependencies for glo workspaces
 Usage: glo-local [--dry-run] <command>
 
 Commands:
-  all       Install base, py, rs, hs, ts, ps, notes
-  need      Install all except toolchains disabled in .devcontainer/*.json*
+  all       Install base, py, rs, hs, wasm, rocq, ts, ps, notes
+  need      Install all except disabled toolchains; Rocq only installs when ROCQ_ENABLED is enabled
   base      Install common CLI tools
   py        Install Python/uv tooling
   rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src, wasm32 target, cargo-binstall, cargo-run-bin
   hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, ormolu, hlint via ghcup
   wasm      Install wasm32-wasi GHC tooling via ghc-wasm-meta (${WASM_GHC_FLAVOUR})
+  rocq      Install Rocq ${ROCQ_VERSION}, vsrocqtop, and command-line tools via opam
   ts,node   Install nvm-managed Node.js/npm tooling (${NODE_VERSION})
   ps        Install PureScript tooling
   notes     Install zk/sqlite tooling
@@ -302,6 +306,43 @@ install_wasm_wrapper() {
     chmod 755 "$dest"
 }
 
+ensure_opam() {
+    if command -v opam >/dev/null 2>&1; then
+        return
+    fi
+    case "$OS" in
+        arch)
+            pkg_install opam
+            ;;
+        macos)
+            pkg_install opam
+            ;;
+    esac
+    [[ "$DRY_RUN" -eq 1 ]] && return
+    command -v opam >/dev/null 2>&1 || die "opam was not found after package install. Install opam, then rerun 'glo-local rocq'."
+}
+
+install_rocq() {
+    log "Installing Rocq ${ROCQ_VERSION} and ${VSROCQ_LANGUAGE_SERVER_PACKAGE} via opam"
+    ensure_opam
+    if [[ "$DRY_RUN" -eq 0 && ! -d "${OPAMROOT:-$HOME/.opam}" ]]; then
+        run opam init --bare --disable-sandboxing --no-setup --yes
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]] || ! opam switch list --short | grep -qx rocq; then
+        run opam switch create rocq "ocaml-base-compiler.${ROCQ_OCAML_VERSION}" --yes
+    fi
+    if [[ "$DRY_RUN" -eq 1 ]] || ! opam repo list --short | grep -qx rocq-released; then
+        run opam repo add rocq-released https://rocq-prover.org/opam/released --yes
+    fi
+    run opam update --yes
+    run opam install --switch=rocq --yes "rocq-prover.${ROCQ_VERSION}" "${VSROCQ_LANGUAGE_SERVER_PACKAGE}"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        eval "$(opam env --switch=rocq --set-switch)"
+        command -v rocq >/dev/null 2>&1 || warn "Run: eval \"\$(opam env --switch=rocq --set-switch)\" to use rocq"
+        command -v vsrocqtop >/dev/null 2>&1 || warn "Run: eval \"\$(opam env --switch=rocq --set-switch)\" to use vsrocqtop"
+    fi
+}
+
 source_nvm() {
     if command -v nvm >/dev/null 2>&1; then
         return 0
@@ -404,6 +445,21 @@ devcontainer_arg_disabled() {
     return 1
 }
 
+devcontainer_arg_enabled() {
+    local flag="$1"
+    local workspace="$2"
+    local file
+    shopt -s nullglob
+    for file in "$workspace"/.devcontainer/*.json "$workspace"/.devcontainer/*.jsonc; do
+        if grep -Eiq '"'"$flag"'"[[:space:]]*:[[:space:]]*"?(1|true|yes|on)"?' "$file"; then
+            shopt -u nullglob
+            return 0
+        fi
+    done
+    shopt -u nullglob
+    return 1
+}
+
 install_need() {
     local workspace
     workspace="$(find_workspace)"
@@ -429,6 +485,12 @@ install_need() {
         install_wasm
     fi
 
+    if devcontainer_arg_enabled ROCQ_ENABLED "$workspace"; then
+        install_rocq
+    else
+        log "Skipping Rocq toolchain; ROCQ_ENABLED is disabled"
+    fi
+
     install_ts
 
     if devcontainer_arg_disabled PURESCRIPT_ENABLED "$workspace"; then
@@ -445,7 +507,7 @@ doctor() {
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
     source_nvm >/dev/null 2>&1 || true
-    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt nvm node npm purs spago purs-tidy zk; do
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt opam rocq rocqchk vsrocqtop nvm node npm purs spago purs-tidy zk; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else
@@ -480,6 +542,7 @@ main() {
             install_rs
             install_hs
             install_wasm
+            install_rocq
             install_ts
             install_ps
             install_notes
@@ -490,6 +553,7 @@ main() {
         rs) install_rs ;;
         hs) install_hs ;;
         wasm) install_wasm ;;
+        rocq) install_rocq ;;
         ts|node) install_ts ;;
         ps) install_ps ;;
         notes) install_notes ;;

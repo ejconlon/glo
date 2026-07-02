@@ -1,0 +1,3 @@
+-Q src {{cookiecutter.name}}
+src/Example.v
+test/TestExample.v

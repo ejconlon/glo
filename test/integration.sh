@@ -37,11 +37,13 @@ bin/glo-gen rs   test_rs
 bin/glo-gen hs   test_hs
 bin/glo-gen py   test_py
 bin/glo-gen ts   test_ts
+bin/glo-gen rocq test_rocq
 [[ -f lib/test_meta/build.json ]] && ok "meta scaffolded"
 [[ -f lib/test_rs/Cargo.toml ]]   && ok "rs scaffolded"
 [[ -f lib/test_hs/test_hs.cabal ]] && ok "hs scaffolded"
 [[ -f lib/test_py/pyproject.toml ]] && ok "py scaffolded"
 [[ -f lib/test_ts/package.json ]]  && ok "ts scaffolded"
+[[ -f lib/test_rocq/_CoqProject ]] && ok "rocq scaffolded"
 
 # --- Build: venv ---
 step "glo-build venv (all)"

@@ -112,7 +112,7 @@ def get_git_info() -> dict[str, str]:
         if result.returncode == 0:
             info["sha"] = result.stdout.strip()
             info["sha_short"] = info["sha"][:7]
-    except subprocess.TimeoutExpired, FileNotFoundError:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     try:
         result = subprocess.run(
@@ -123,7 +123,7 @@ def get_git_info() -> dict[str, str]:
         )
         if result.returncode == 0:
             info["branch"] = result.stdout.strip() or "unknown"
-    except subprocess.TimeoutExpired, FileNotFoundError:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     try:
         result = subprocess.run(
@@ -134,7 +134,7 @@ def get_git_info() -> dict[str, str]:
         )
         if result.returncode == 0:
             info["dirty"] = "true" if result.stdout.strip() else "false"
-    except subprocess.TimeoutExpired, FileNotFoundError:
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     return info
 
@@ -153,6 +153,7 @@ class Lang(Enum):
     Haskell = auto()
     Rust = auto()
     TypeScript = auto()
+    Rocq = auto()
 
 
 class TaskStatus(Enum):
@@ -671,6 +672,8 @@ class BuildConfig:
             return Lang.Rust
         elif self.language_str == "ts":
             return Lang.TypeScript
+        elif self.language_str == "rocq":
+            return Lang.Rocq
         raise ValueError(f"Unknown language: {self.language_str}")
 
 
@@ -691,7 +694,7 @@ def read_build_json(project_path: Path, rel_path: str) -> BuildConfig | None:
     language_str = data.get("language")
     if language_str is None:
         raise ValueError(f"Missing 'language' field in {build_json}")
-    if language_str not in ("py", "ps", "meta", "hs", "rs", "ts"):
+    if language_str not in ("py", "ps", "meta", "hs", "rs", "ts", "rocq"):
         raise ValueError(f"Invalid language '{language_str}' in {build_json}")
 
     # Parse targets if present
@@ -1019,6 +1022,32 @@ class Project:
         script.raw('GLO_NODE_BIN="$(dirname "$(command -v node)")"')
         script.raw('if [ "$_GLO_NOUNSET_WAS_ON" -eq 1 ]; then set -u; fi')
         script.raw('unset _GLO_NOUNSET_WAS_ON')
+
+    def emit_rocq(self, script: Script, args: list[str]) -> None:
+        """Emit a Rocq command from the project root."""
+        path = script.workspace_path(self.abs_path)
+        script.enter_project(path)
+        self.emit_rocq_env(script)
+        script.run(["rocq"] + args)
+
+    def emit_rocq_env(self, script: Script) -> None:
+        """Make Rocq available for this build without requiring shell PATH setup."""
+        script.raw('if ! command -v rocq >/dev/null 2>&1; then')
+        script.raw('    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then')
+        script.raw('        eval "$(opam env --switch=rocq --set-switch)"')
+        script.raw('    fi')
+        script.raw('fi')
+        script.raw('if ! command -v rocq >/dev/null 2>&1; then echo "[E] rocq not found; run glo-local rocq or enable ROCQ_ENABLED in the devcontainer" >&2; exit 1; fi')
+
+    def emit_rocq_make(self, script: Script, args: list[str]) -> None:
+        """Emit a make-backed Rocq project build using _CoqProject."""
+        path = script.workspace_path(self.abs_path)
+        script.enter_project(path)
+        self.emit_rocq_env(script)
+        script.raw("if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi")
+        make_args = shcmd(args)
+        make_cmd = "make" + (f" {make_args}" if make_args else "")
+        script.raw(f"if [ -f Makefile ]; then {make_cmd}; else find . -name '*.v' -print0 | xargs -0 -r -n1 rocq compile; fi")
 
 
 # ---------------------------------------------------------------------------
@@ -2024,6 +2053,87 @@ def cmd_repl_ts(script: Script, project: Project, args: list[str]) -> None:
 @command("license-check", "Check dependency licenses", lang=Lang.TypeScript)
 def cmd_license_check_ts(script: Script, project: Project, args: list[str]) -> None:
     """Check dependency licenses (no-op for TypeScript)."""
+    del args  # unused
+    script.info(f"License check for {project.path} (no-op)")
+
+
+# ---------------------------------------------------------------------------
+# Common project commands - Rocq
+# ---------------------------------------------------------------------------
+
+
+@command("venv", "Sync dependencies", lang=Lang.Rocq)
+def cmd_venv_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Prepare Rocq project build files."""
+    del args  # unused
+    script.info(f"Preparing Rocq project {project.path}")
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    project.emit_rocq_env(script)
+    script.raw("if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi")
+
+
+@command("format", "Format code", lang=Lang.Rocq)
+def cmd_format_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """No standard Rocq formatter is available."""
+    del args  # unused
+    script.info(f"Formatting {project.path} (no-op)")
+
+
+@command("typecheck", "Typecheck code", lang=Lang.Rocq)
+def cmd_typecheck_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Compile Rocq files."""
+    del args  # unused
+    script.info(f"Typechecking {project.path}")
+    project.emit_rocq_make(script, [])
+
+
+@command("lint", "Lint code", lang=Lang.Rocq)
+def cmd_lint_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """No standard Rocq linter is available."""
+    del args  # unused
+    script.info(f"Linting {project.path} (no-op)")
+
+
+@command("unit", "Run unit tests", lang=Lang.Rocq)
+def cmd_unit_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Rocq tests are checked as part of project compilation."""
+    del args  # unused
+    script.info(f"Testing {project.path} (covered by typecheck)")
+
+
+@command("doc", "Generate documentation", lang=Lang.Rocq)
+def cmd_doc_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Generate Rocq documentation for project files."""
+    script.info(f"Generating docs for {project.path}")
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    script.raw("mkdir -p doc")
+    script.raw("find . -name '*.v' -print0 | xargs -0 -r rocq doc -d doc " + shcmd(args))
+
+
+@command("clean", "Clean generated files and caches", lang=Lang.Rocq)
+def cmd_clean_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Clean Rocq build artifacts."""
+    del args  # unused
+    script.info(f"Cleaning {project.path}")
+    path = script.workspace_path(project.abs_path)
+    script.enter_project(path)
+    script.raw("if [ -f Makefile ]; then make cleanall || make clean; fi")
+    script.raw("find . -type f \\( -name '*.vo' -o -name '*.vos' -o -name '*.vok' -o -name '*.glob' -o -name '*.aux' \\) -delete")
+    script.run(["rm", "-rf", "doc", script.workspace_path(project.venv_path)])
+
+
+@command("repl", "Start a REPL", project_only=True, lang=Lang.Rocq)
+def cmd_repl_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Start Rocq repl."""
+    script.info(f"Starting Rocq repl for {project.path}")
+    project.emit_rocq(script, ["repl"] + args)
+
+
+@command("license-check", "Check dependency licenses", lang=Lang.Rocq)
+def cmd_license_check_rocq(script: Script, project: Project, args: list[str]) -> None:
+    """Check dependency licenses (no-op for Rocq)."""
     del args  # unused
     script.info(f"License check for {project.path} (no-op)")
 
@@ -3564,7 +3674,7 @@ def emit_command(
         # Regular command: emit via language-specific handler
         handler = cmd.get_handler(project.language)
         if handler is None:
-            if project.language in (Lang.Meta, Lang.Rust, Lang.TypeScript):
+            if project.language in (Lang.Meta, Lang.Rust, Lang.TypeScript, Lang.Rocq):
                 script.info(f"Skipping {cmd.name} for {project.path} ({project.language.name})")
                 return
             raise AssertionError(f"No handler for {cmd.name} with {project.language}")

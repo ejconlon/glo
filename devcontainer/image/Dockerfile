@@ -282,6 +282,47 @@ RUN if [ "${WASM_GHC_ENABLED}" = "1" ]; then \
     wasmtime --version; \
     fi
 
+# Install Rocq prover and command-line tools via opam.
+ARG ROCQ_ENABLED=0
+ARG ROCQ_OCAML_VERSION=5.3.0
+ARG OPAM_VERSION=2.5.1
+ENV OPAMROOT=/opt/opam
+RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
+    set -eux; \
+    microdnf -y --setopt=install_weak_deps=0 install m4 perl bubblewrap; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) opam_arch="x86_64"; checksum="33705e328d9f740026ce182079e2457639791bcf04a0e4bafbdb2024dd4d6092" ;; \
+        aarch64) opam_arch="arm64"; checksum="fab63e2a594afeb0acc2cbc3f796d365a0ee1d55447d1dd4104f2ea2dbd9a0d3" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/opam "https://github.com/ocaml/opam/releases/download/${OPAM_VERSION}/opam-${OPAM_VERSION}-${opam_arch}-linux"; \
+    echo "${checksum}  /tmp/opam" | sha256sum -c -; \
+    install -m 0755 /tmp/opam /usr/local/bin/opam; \
+    rm -f /tmp/opam; \
+    opam init --bare --disable-sandboxing --no-setup --yes; \
+    fi
+RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
+    set -eux; \
+    opam switch create rocq "ocaml-base-compiler.${ROCQ_OCAML_VERSION}" --yes; \
+    eval "$(opam env --switch=rocq --set-switch)"; \
+    opam repo add rocq-released https://rocq-prover.org/opam/released --yes; \
+    opam update --yes; \
+    fi
+ARG ROCQ_VERSION=9.0.0
+ARG VSROCQ_LANGUAGE_SERVER_PACKAGE=vsrocq-language-server
+RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
+    set -eux; \
+    opam install --switch=rocq --yes "rocq-prover.${ROCQ_VERSION}" "${VSROCQ_LANGUAGE_SERVER_PACKAGE}"; \
+    opam clean --all --yes; \
+    chmod -R a+rX "${OPAMROOT}"; \
+    ln -sf "${OPAMROOT}/rocq/bin/rocq" /usr/local/bin/rocq; \
+    ln -sf "${OPAMROOT}/rocq/bin/rocqchk" /usr/local/bin/rocqchk; \
+    ln -sf "${OPAMROOT}/rocq/bin/vsrocqtop" /usr/local/bin/vsrocqtop; \
+    rocq --version; \
+    command -v vsrocqtop; \
+    fi
+
 # Setup home
 ARG PROJECT_NAME=workspace
 RUN groupadd --gid 1000 user \
