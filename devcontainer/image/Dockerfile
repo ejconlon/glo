@@ -289,7 +289,7 @@ ARG OPAM_VERSION=2.5.1
 ENV OPAMROOT=/opt/opam
 RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     set -eux; \
-    microdnf -y --setopt=install_weak_deps=0 install m4 perl bubblewrap; \
+    microdnf -y --setopt=install_weak_deps=0 install m4 perl bubblewrap clang; \
     arch="$(uname -m)"; \
     case "${arch}" in \
         x86_64) opam_arch="x86_64"; checksum="33705e328d9f740026ce182079e2457639791bcf04a0e4bafbdb2024dd4d6092" ;; \
@@ -311,9 +311,10 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     fi
 ARG ROCQ_VERSION=9.0.0
 ARG VSROCQ_LANGUAGE_SERVER_PACKAGE=vsrocq-language-server
+ARG ROCQ_EXTRA_PACKAGES="rocq-equations.1.3.1+9.0 coq-quickchick.2.1.1 coq-ext-lib.0.13.0 coq-hammer.1.3.2+9.0 coq-hammer-tactics.1.3.2+9.0"
 RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     set -eux; \
-    opam install --switch=rocq --yes "rocq-prover.${ROCQ_VERSION}" "${VSROCQ_LANGUAGE_SERVER_PACKAGE}"; \
+    opam install --switch=rocq --yes "rocq-prover.${ROCQ_VERSION}" "${VSROCQ_LANGUAGE_SERVER_PACKAGE}" ${ROCQ_EXTRA_PACKAGES}; \
     opam clean --all --yes; \
     chmod -R a+rX "${OPAMROOT}"; \
     ln -sf "${OPAMROOT}/rocq/bin/rocq" /usr/local/bin/rocq; \
@@ -321,6 +322,28 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     ln -sf "${OPAMROOT}/rocq/bin/vsrocqtop" /usr/local/bin/vsrocqtop; \
     rocq --version; \
     command -v vsrocqtop; \
+    fi
+
+# Install SMT solver tooling from GitHub releases.
+ARG SMT_ENABLED=0
+ARG Z3_VERSION=4.16.0
+ARG Z3_SHA256_X64=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
+ARG Z3_SHA256_ARM64=87fcd963d3eecb0f12cf1c3ef0ad74e84a3a7bd3caed5d94445645ef94ae6274
+RUN if [ "${SMT_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) asset="z3-${Z3_VERSION}-x64-glibc-2.39.zip"; checksum="${Z3_SHA256_X64}" ;; \
+        aarch64) asset="z3-${Z3_VERSION}-arm64-glibc-2.38.zip"; checksum="${Z3_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo "/tmp/${asset}" "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${asset}"; \
+    echo "${checksum}  /tmp/${asset}" | sha256sum -c -; \
+    unzip -q "/tmp/${asset}" -d /opt; \
+    mv "/opt/${asset%.zip}" "/opt/z3-${Z3_VERSION}"; \
+    ln -sf "/opt/z3-${Z3_VERSION}/bin/z3" /usr/local/bin/z3; \
+    rm -f "/tmp/${asset}"; \
+    z3 --version; \
     fi
 
 # Setup home
