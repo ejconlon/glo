@@ -2119,7 +2119,12 @@ def cmd_clean_rocq(script: Script, project: Project, args: list[str]) -> None:
     script.info(f"Cleaning {project.path}")
     path = script.workspace_path(project.abs_path)
     script.enter_project(path)
-    script.raw("if [ -f Makefile ]; then make cleanall || make clean; fi")
+    script.raw("if ! command -v rocq >/dev/null 2>&1; then")
+    script.raw("    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then")
+    script.raw('        eval "$(opam env --switch=rocq --set-switch)"')
+    script.raw("    fi")
+    script.raw("fi")
+    script.raw("if [ -f Makefile ] && command -v rocq >/dev/null 2>&1; then make cleanall || make clean; fi")
     script.raw("find . -type f \\( -name '*.vo' -o -name '*.vos' -o -name '*.vok' -o -name '*.glob' -o -name '*.aux' \\) -delete")
     script.run(["rm", "-rf", "doc", script.workspace_path(project.venv_path)])
 
