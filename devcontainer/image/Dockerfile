@@ -395,7 +395,7 @@ RUN if [ "${GEMINI_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @google/gemini-cli@0.49.0; \
+      @google/gemini-cli@0.51.0; \
     fi
 
 # Install codex
@@ -404,7 +404,7 @@ RUN if [ "${CODEX_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @openai/codex@0.142.4; \
+      @openai/codex@0.144.6; \
     fi
 
 # Install opencode
@@ -413,7 +413,7 @@ RUN if [ "${OPENCODE_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      opencode-ai@1.17.11; \
+      opencode-ai@1.18.3; \
     fi
 
 # Install glo
