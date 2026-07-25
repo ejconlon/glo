@@ -162,7 +162,15 @@ single_healthy_server() {
 }
 
 serve() {
-    local cid port serve_pid
+    local cid port serve_pid server
+    if server=$(healthy_server); then
+        cid=${server%%$'\t'*}
+        port=${server##*$'\t'}
+        echo "OPENCODE_HOST_PORT=$port"
+        echo "OPENCODE_CONTAINER_ID=$cid"
+        return 0
+    fi
+
     local before_file
     before_file=$(mktemp)
     container_ids >"$before_file"
