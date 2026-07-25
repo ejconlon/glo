@@ -123,7 +123,8 @@ host_port() {
 
 server_healthy() {
     local port=$1
-    curl -fsS "http://127.0.0.1:${port}/global/health" >/dev/null 2>&1
+    curl -fsS --connect-timeout 0.5 --max-time 1 \
+        "http://127.0.0.1:${port}/global/health" >/dev/null 2>&1
 }
 
 urlencode() {
@@ -162,15 +163,7 @@ single_healthy_server() {
 }
 
 serve() {
-    local cid port serve_pid server
-    if server=$(healthy_server); then
-        cid=${server%%$'\t'*}
-        port=${server##*$'\t'}
-        echo "OPENCODE_HOST_PORT=$port"
-        echo "OPENCODE_CONTAINER_ID=$cid"
-        return 0
-    fi
-
+    local cid port serve_pid
     local before_file
     before_file=$(mktemp)
     container_ids >"$before_file"
