@@ -36,7 +36,7 @@ glo-agent issue create "Short task title"
 glo-agent focus push <issue-id>
 ```
 
-If `AGENT_NAME` is set, `glo-agent` tracks ownership and focus under `.glo/agent/$AGENT_NAME/`. Devcontainer lifecycle commands set `AGENT_NAME` automatically for agent sessions.
+`glo-agent` tracks ownership and focus under `.glo/agent/$AGENT_NAME/`. It defaults `AGENT_NAME` to `agent`; devcontainer lifecycle commands set a more specific name automatically for agent sessions.
 
 Use `--force` only when intentionally overriding another agent's ownership.
 

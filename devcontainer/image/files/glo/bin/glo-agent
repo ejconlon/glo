@@ -2,8 +2,10 @@
 set -euo pipefail
 
 # glo-agent - agent-aware issue CLI
-# With AGENT_NAME: routes to base/agent/$AGENT_NAME/, supports focus
-# Without AGENT_NAME: routes to base/issue/, focus commands disabled
+# Defaults AGENT_NAME to "agent" and tracks focus under .glo/agent/$AGENT_NAME/.
+
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+export AGENT_NAME="${AGENT_NAME:-agent}"
 
 _find_workspace() {
     local d="$PWD"
@@ -18,15 +20,11 @@ WORKSPACE_DIR="$(_find_workspace)"
 [[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
 
 TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
-if [[ -n "${AGENT_NAME:-}" ]]; then
-    AGENT_DIR="${WORKSPACE_DIR}/.glo/agent/${AGENT_NAME}"
-    mkdir -p "$AGENT_DIR"
-else
-    AGENT_DIR=""
-fi
+AGENT_DIR="${WORKSPACE_DIR}/.glo/agent/${AGENT_NAME}"
+mkdir -p "$AGENT_DIR"
 
 issue() {
-    TICKETS_DIR="${TICKETS_DIR}" glo-issue "$@"
+    TICKETS_DIR="${TICKETS_DIR}" "${_GLO_BIN_DIR}/glo-issue" "$@"
 }
 
 # Resolve a ticket path by exact or partial ID match (mirrors glo-issue logic)
@@ -563,7 +561,7 @@ cmd_unassign() {
 }
 
 cmd_precommit() {
-    glo-build --filter=work precommit
+    "${_GLO_BIN_DIR}/glo-build" --filter=work precommit
 }
 
 # --- Issue subcommand dispatcher ---

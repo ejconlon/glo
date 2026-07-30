@@ -100,7 +100,13 @@ bin/glo-issue query | jq -e '.' > /dev/null
 ok "query (JSON output valid)"
 
 # --- glo-agent ---
-step "glo-agent: setup"
+step "glo-agent: dispatcher and default name"
+unset AGENT_NAME
+DEFAULT_AGENT_TASK=$(env PATH=/usr/bin:/bin bin/glo agent issue create "Default agent task")
+bin/glo-issue show "$DEFAULT_AGENT_TASK" | grep -q '^assignee: agent$'
+ok "dispatcher finds sibling tools; AGENT_NAME defaults to agent"
+
+step "glo-agent: named setup"
 export AGENT_NAME=test_agent
 
 A1=$(bin/glo-agent issue create "Agent task one")
