@@ -112,7 +112,7 @@ def get_git_info() -> dict[str, str]:
         if result.returncode == 0:
             info["sha"] = result.stdout.strip()
             info["sha_short"] = info["sha"][:7]
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired, FileNotFoundError:
         pass
     try:
         result = subprocess.run(
@@ -123,7 +123,7 @@ def get_git_info() -> dict[str, str]:
         )
         if result.returncode == 0:
             info["branch"] = result.stdout.strip() or "unknown"
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired, FileNotFoundError:
         pass
     try:
         result = subprocess.run(
@@ -134,7 +134,7 @@ def get_git_info() -> dict[str, str]:
         )
         if result.returncode == 0:
             info["dirty"] = "true" if result.stdout.strip() else "false"
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except subprocess.TimeoutExpired, FileNotFoundError:
         pass
     return info
 
@@ -931,19 +931,19 @@ class Project:
         )
         script.raw(
             'if [ ! -f "${CABAL_DIR}/packages/hackage.haskell.org/01-index.tar" ]; then '
-            'cabal --config-file=${CABAL_DIR}/config update; '
-            'fi'
+            "cabal --config-file=${CABAL_DIR}/config update; "
+            "fi"
         )
         script.raw(
             'for _pkgdb in "${HS_VENV}"/store/ghc-*/package.db; do '
             '[ -d "${_pkgdb}" ] || continue; '
             'if ! ghc-pkg check --package-db="${_pkgdb}" >/tmp/glo-ghc-pkg-check 2>&1; then '
             'echo "[W] Cabal store package DB is inconsistent; rebuilding ${HS_VENV}/store"; '
-            'cat /tmp/glo-ghc-pkg-check; '
+            "cat /tmp/glo-ghc-pkg-check; "
             'rm -rf "${HS_VENV}/store" "${HS_VENV}/dist-newstyle"; '
-            'break; '
-            'fi; '
-            'done'
+            "break; "
+            "fi; "
+            "done"
         )
 
     def emit_cabal(self, script: Script, args: list[str]) -> None:
@@ -970,7 +970,7 @@ class Project:
         script.export("CARGO_TARGET_DIR", f"{rs_venv}/target")
         script.export("RS_VENV", rs_venv)
         script.raw(
-            'if command -v glo-cargo-run-bin >/dev/null 2>&1; then '
+            "if command -v glo-cargo-run-bin >/dev/null 2>&1; then "
             'export GLO_CARGO_RUN_BIN="$(command -v glo-cargo-run-bin)"; '
             'else export GLO_CARGO_RUN_BIN="${WORKSPACE}/submodules/glo/devcontainer/image/files/glo/bin/glo-cargo-run-bin"; fi'
         )
@@ -1000,8 +1000,8 @@ class Project:
     def emit_nvm_node_bin(self, script: Script) -> None:
         """Resolve latest LTS Node via nvm and expose its bin directory."""
         script.raw('export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"')
-        script.raw('_GLO_NOUNSET_WAS_ON=0')
-        script.raw('case $- in *u*) _GLO_NOUNSET_WAS_ON=1; set +u ;; esac')
+        script.raw("_GLO_NOUNSET_WAS_ON=0")
+        script.raw("case $- in *u*) _GLO_NOUNSET_WAS_ON=1; set +u ;; esac")
         script.raw(
             'for _glo_nvm_sh in "$NVM_DIR/nvm.sh" '
             '"/usr/local/nvm/nvm.sh" '
@@ -1010,18 +1010,16 @@ class Project:
             '"/usr/share/nvm/init-nvm.sh" '
             '"/usr/share/nvm/nvm.sh"; do'
         )
+        script.raw('    if [ -s "$_glo_nvm_sh" ]; then . "$_glo_nvm_sh"; break; fi')
+        script.raw("done")
         script.raw(
-            '    if [ -s "$_glo_nvm_sh" ]; then . "$_glo_nvm_sh"; break; fi'
-        )
-        script.raw('done')
-        script.raw(
-            'if ! command -v nvm >/dev/null 2>&1; then '
+            "if ! command -v nvm >/dev/null 2>&1; then "
             'echo "[E] nvm not found; run glo-local ts" >&2; exit 1; fi'
         )
-        script.raw('nvm use --silent --lts >/dev/null')
+        script.raw("nvm use --silent --lts >/dev/null")
         script.raw('GLO_NODE_BIN="$(dirname "$(command -v node)")"')
         script.raw('if [ "$_GLO_NOUNSET_WAS_ON" -eq 1 ]; then set -u; fi')
-        script.raw('unset _GLO_NOUNSET_WAS_ON')
+        script.raw("unset _GLO_NOUNSET_WAS_ON")
 
     def emit_rocq(self, script: Script, args: list[str]) -> None:
         """Emit a Rocq command from the project root."""
@@ -1032,22 +1030,30 @@ class Project:
 
     def emit_rocq_env(self, script: Script) -> None:
         """Make Rocq available for this build without requiring shell PATH setup."""
-        script.raw('if ! command -v rocq >/dev/null 2>&1; then')
-        script.raw('    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then')
+        script.raw("if ! command -v rocq >/dev/null 2>&1; then")
+        script.raw(
+            "    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then"
+        )
         script.raw('        eval "$(opam env --switch=rocq --set-switch)"')
-        script.raw('    fi')
-        script.raw('fi')
-        script.raw('if ! command -v rocq >/dev/null 2>&1; then echo "[E] rocq not found; run glo-local rocq or enable ROCQ_ENABLED in the devcontainer" >&2; exit 1; fi')
+        script.raw("    fi")
+        script.raw("fi")
+        script.raw(
+            'if ! command -v rocq >/dev/null 2>&1; then echo "[E] rocq not found; run glo-local rocq or enable ROCQ_ENABLED in the devcontainer" >&2; exit 1; fi'
+        )
 
     def emit_rocq_make(self, script: Script, args: list[str]) -> None:
         """Emit a make-backed Rocq project build using _CoqProject."""
         path = script.workspace_path(self.abs_path)
         script.enter_project(path)
         self.emit_rocq_env(script)
-        script.raw("if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi")
+        script.raw(
+            "if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi"
+        )
         make_args = shcmd(args)
         make_cmd = "make" + (f" {make_args}" if make_args else "")
-        script.raw(f"if [ -f Makefile ]; then {make_cmd}; else find . -name '*.v' -print0 | xargs -0 -r -n1 rocq compile; fi")
+        script.raw(
+            f"if [ -f Makefile ]; then {make_cmd}; else find . -name '*.v' -print0 | xargs -0 -r -n1 rocq compile; fi"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1146,7 +1152,9 @@ def cmd_venv_py(script: Script, project: Project, args: list[str]) -> None:
     venv = script.workspace_path(project.venv_path)
     script.export("UV_PYTHON_INSTALL_DIR", "${WORKSPACE}/.glo/python")
     script.export("UV_PROJECT_ENVIRONMENT", venv)
-    script.raw('if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python3" ]; then rm -rf "$UV_PROJECT_ENVIRONMENT"; fi')
+    script.raw(
+        'if [ ! -x "$UV_PROJECT_ENVIRONMENT/bin/python3" ]; then rm -rf "$UV_PROJECT_ENVIRONMENT"; fi'
+    )
     script.run(["uv", "sync", "--package", project.package_name])
     # Install Playwright Firefox browser if playwright is in any dependency group
     script.raw(
@@ -1167,20 +1175,14 @@ def cmd_format_py(script: Script, project: Project, args: list[str]) -> None:
 
 @command("typecheck", "Typecheck code", lang=Lang.Python)
 def cmd_typecheck_py(script: Script, project: Project, args: list[str]) -> None:
-    """Typecheck with mypy."""
+    """Typecheck with ty."""
     del args  # unused
     script.info(f"Typechecking {project.path}")
-    project.emit_python(
-        script,
-        [
-            "-m",
-            "mypy",
-            "--strict",
-            "--config-file=pyproject.toml",
-            project.package_name,
-            "tests",
-        ],
-    )
+    path = script.workspace_path(project.abs_path)
+    is_new = script.enter_project(path)
+    if is_new:
+        project.emit_env(script)
+    script.run(["${VIRTUAL_ENV}/bin/ty", "check", project.package_name, "tests"])
 
 
 @command("lint", "Lint code", lang=Lang.Python)
@@ -1208,8 +1210,6 @@ def cmd_clean_py(script: Script, project: Project, args: list[str]) -> None:
     del args  # unused
     script.info(f"Cleaning {project.path}")
     dirs_to_remove = [
-        ".mypy_cache",
-        ".mypy_cache_strict",
         ".pytest_cache",
         ".ruff_cache",
         "__pycache__",
@@ -1721,7 +1721,9 @@ def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> Non
     dirs = ["src"]
     if (project.abs_path / "test").exists():
         dirs.append("test")
-    script.raw('if ! command -v ormolu >/dev/null 2>&1; then echo "[I] Skipping Haskell format; ormolu not found"; exit 0; fi')
+    script.raw(
+        'if ! command -v ormolu >/dev/null 2>&1; then echo "[I] Skipping Haskell format; ormolu not found"; exit 0; fi'
+    )
     script.raw('_ORMOLU_CONF="${WORKSPACE}/config/hs/ormolu.yaml"')
     script.raw(
         '[ -f "$_ORMOLU_CONF" ]'
@@ -1809,13 +1811,9 @@ def cmd_lint_haskell(script: Script, project: Project, args: list[str]) -> None:
     if (project.abs_path / "test").exists():
         dirs.append("test")
     dir_args = " ".join(dirs)
+    script.raw('_HLINT_CONF="${WORKSPACE}/config/hs/hlint.yaml"')
     script.raw(
-        '_HLINT_CONF="${WORKSPACE}/config/hs/hlint.yaml"'
-    )
-    script.raw(
-        '[ -f "$_HLINT_CONF" ]'
-        ' && _HLINT_ARGS="--hint=$_HLINT_CONF"'
-        " || _HLINT_ARGS="
+        '[ -f "$_HLINT_CONF" ] && _HLINT_ARGS="--hint=$_HLINT_CONF" || _HLINT_ARGS='
     )
     script.raw(f"hlint $_HLINT_ARGS {dir_args}")
     # NOTE: apply-refact is really flaky, so this didn't work so well:
@@ -1944,7 +1942,9 @@ def cmd_license_check_rs(script: Script, project: Project, args: list[str]) -> N
     script.info(f"License check for {project.path} (no-op)")
 
 
-@command("run-bin", "Run a project-pinned Rust binary", project_only=True, lang=Lang.Rust)
+@command(
+    "run-bin", "Run a project-pinned Rust binary", project_only=True, lang=Lang.Rust
+)
 def cmd_run_bin_rs(script: Script, project: Project, args: list[str]) -> None:
     """Run a binary declared in [package.metadata.bin] via the project venv."""
     if not args:
@@ -2070,7 +2070,9 @@ def cmd_venv_rocq(script: Script, project: Project, args: list[str]) -> None:
     path = script.workspace_path(project.abs_path)
     script.enter_project(path)
     project.emit_rocq_env(script)
-    script.raw("if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi")
+    script.raw(
+        "if [ -f _CoqProject ]; then rocq makefile -f _CoqProject -o Makefile; fi"
+    )
 
 
 @command("format", "Format code", lang=Lang.Rocq)
@@ -2109,7 +2111,9 @@ def cmd_doc_rocq(script: Script, project: Project, args: list[str]) -> None:
     path = script.workspace_path(project.abs_path)
     script.enter_project(path)
     script.raw("mkdir -p doc")
-    script.raw("find . -name '*.v' -print0 | xargs -0 -r rocq doc -d doc " + shcmd(args))
+    script.raw(
+        "find . -name '*.v' -print0 | xargs -0 -r rocq doc -d doc " + shcmd(args)
+    )
 
 
 @command("clean", "Clean generated files and caches", lang=Lang.Rocq)
@@ -2120,12 +2124,18 @@ def cmd_clean_rocq(script: Script, project: Project, args: list[str]) -> None:
     path = script.workspace_path(project.abs_path)
     script.enter_project(path)
     script.raw("if ! command -v rocq >/dev/null 2>&1; then")
-    script.raw("    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then")
+    script.raw(
+        "    if command -v opam >/dev/null 2>&1 && opam switch list --short 2>/dev/null | grep -qx rocq; then"
+    )
     script.raw('        eval "$(opam env --switch=rocq --set-switch)"')
     script.raw("    fi")
     script.raw("fi")
-    script.raw("if [ -f Makefile ] && command -v rocq >/dev/null 2>&1; then make cleanall || make clean; fi")
-    script.raw("find . -type f \\( -name '*.vo' -o -name '*.vos' -o -name '*.vok' -o -name '*.glob' -o -name '*.aux' \\) -delete")
+    script.raw(
+        "if [ -f Makefile ] && command -v rocq >/dev/null 2>&1; then make cleanall || make clean; fi"
+    )
+    script.raw(
+        "find . -type f \\( -name '*.vo' -o -name '*.vos' -o -name '*.vok' -o -name '*.glob' -o -name '*.aux' \\) -delete"
+    )
     script.run(["rm", "-rf", "doc", script.workspace_path(project.venv_path)])
 
 
@@ -2651,7 +2661,9 @@ def generate_sequential_script(
     add("set -euo pipefail")
     add("")
     add(f"export WORKSPACE=${{WORKSPACE:-{shquote(str(workspace))}}}")
-    add('[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
+    add(
+        '[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"'
+    )
     add("")
 
     # Color codes
@@ -2720,7 +2732,9 @@ def generate_parallel_script(
     add("set -uo pipefail  # Note: -e not set, we handle errors ourselves")
     add("")
     add(f"export WORKSPACE=${{WORKSPACE:-{shquote(str(workspace))}}}")
-    add('[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"')
+    add(
+        '[ -f "${WORKSPACE}/.python-version" ] && export UV_PYTHON="$(cat "${WORKSPACE}/.python-version")"'
+    )
     add(f"MAX_JOBS={jobs}")
     add("")
 
@@ -3680,7 +3694,9 @@ def emit_command(
         handler = cmd.get_handler(project.language)
         if handler is None:
             if project.language in (Lang.Meta, Lang.Rust, Lang.TypeScript, Lang.Rocq):
-                script.info(f"Skipping {cmd.name} for {project.path} ({project.language.name})")
+                script.info(
+                    f"Skipping {cmd.name} for {project.path} ({project.language.name})"
+                )
                 return
             raise AssertionError(f"No handler for {cmd.name} with {project.language}")
         handler(script, project, args)

@@ -44,6 +44,10 @@ bin/glo-gen rocq test_rocq
 [[ -f lib/test_py/pyproject.toml ]] && ok "py scaffolded"
 [[ -f lib/test_ts/package.json ]]  && ok "ts scaffolded"
 [[ -f lib/test_rocq/_CoqProject ]] && ok "rocq scaffolded"
+grep -q 'ty>=' lib/test_py/pyproject.toml && ok "py scaffold uses ty"
+grep -q '^target/$' lib/test_rs/.gitignore && ok "rs target ignored"
+grep -q '^\.venv/$' lib/test_py/.gitignore && ok "py virtualenv ignored"
+grep -q '^__pycache__/$' lib/test_py/.gitignore && ok "py bytecode ignored"
 
 # --- Build: venv ---
 step "glo-build venv (all)"

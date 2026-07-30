@@ -170,7 +170,7 @@ Language isolation:
 
 | language | tools | state |
 |----------|-------|-------|
-| `py` | uv, ruff, mypy, pytest | `.glo/venv/<name>/` |
+| `py` | uv, ruff, ty, pytest | `.glo/venv/<name>/` |
 | `ps` | spago, purs, purs-tidy | `.glo/venv/<name>/node_modules`, outputs |
 | `hs` | cabal, fourmolu, hlint | `.glo/venv/<name>/cabal`, `dist-newstyle` |
 | `rs` | cargo, rustfmt, clippy | `.glo/venv/<name>/target` |

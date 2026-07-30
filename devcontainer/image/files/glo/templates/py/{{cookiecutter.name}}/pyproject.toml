@@ -6,7 +6,7 @@ description = "{{cookiecutter.description}}"
 dependencies = []
 
 [dependency-groups]
-dev = ["mypy>=1.0", "pytest>=8.0", "ruff>=0.1"]
+dev = ["pytest>=8.0", "ruff>=0.1", "ty>=0.0.64"]
 
 [build-system]
 requires = ["hatchling"]
