@@ -2173,14 +2173,19 @@ def cmd_doc(script: Script, project: Project, args: list[str]) -> None:
 
 
 @command("gen", "Generate code (runs gen.py if present)")
-def cmd_gen(script: Script, project: Project, args: list[str]) -> None:
+def cmd_gen(script: Script, project: Project, _args: list[str]) -> None:
     """Generate code by running gen.py at project root if present."""
-    del args  # unused
     gen_script = project.abs_path / "gen.py"
     if not gen_script.exists():
         script.info(f"No gen.py in {project.path}")
         return
     script.info(f"Generating code for {project.path}")
+    if project.language == Lang.Python:
+        project.emit_python(
+            script,
+            ["-B", script.workspace_path(gen_script)],
+        )
+        return
     path = script.workspace_path(project.abs_path)
     is_new = script.enter_project(path)
     if project.language == Lang.Rust and is_new:
