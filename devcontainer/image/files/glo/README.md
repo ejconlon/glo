@@ -53,6 +53,7 @@ glo-issue ready                           # list open/in-progress issues with cl
 glo-issue blocked                         # list issues blocked by open deps
 glo-issue show <id>                       # show issue plus related context
 glo-issue start <id>                      # status: in_progress
+glo-issue icebox <id>                     # status: icebox (deferred, incomplete)
 glo-issue close <id>                      # status: closed
 glo-issue status <id> open                # set explicit status
 glo-issue dep <id> <blocker-id>           # make id depend on blocker-id
@@ -69,6 +70,20 @@ glo-issue query                           # emit JSON lines
 
 Use dependencies for blocking relationships. Use links for related work that does not block progress.
 
+Issue statuses have distinct lifecycle meanings:
+
+- `open`: planned work eligible for ready or blocked queues;
+- `in_progress`: active work, also eligible for those queues;
+- `icebox`: intentionally deferred, incomplete work excluded from active queues
+  and stored in the issue archive; dependencies on it remain unresolved; and
+- `closed`: completed work that satisfies dependencies and is archived by
+  `glo-notes precommit`.
+
+`glo-notes precommit` moves iceboxed issue files to `base/issue/archive/`.
+Archived issues remain addressable by ID. `glo-issue start <id>` or
+`glo-issue reopen <id>` immediately restores an iceboxed issue to `base/issue/`;
+`glo-agent focus push <id>` does the same while assigning and focusing it.
+
 ## Agent Focus
 
 Use `glo-agent` when acting as an agent. It wraps issue operations with ownership checks and a focus stack.
@@ -79,6 +94,7 @@ glo-agent focus pop                       # pop current issue, mark it open
 glo-agent focus list                      # show focus stack
 glo-agent focus get                       # print current issue ID
 glo-agent focus show                      # show current issue
+glo-agent focus icebox                    # defer current issue and remove from stack
 glo-agent focus close                     # close current issue and remove from stack
 glo-agent focus add-note "Update"         # note current issue
 glo-agent focus create "Title"            # create issue and focus it
@@ -96,6 +112,7 @@ glo-agent issue ready --all               # no ownership filter
 glo-agent issue blocked
 glo-agent issue blocked --all
 glo-agent issue start <id>
+glo-agent issue icebox <id>
 glo-agent issue pause <id>
 glo-agent issue close <id>
 glo-agent issue show <id>
@@ -204,13 +221,15 @@ Generated projects include `build.json` so `glo-build` can discover them.
 
 ```sh
 glo-notes index                  # update zk index and generated indexes
-glo-notes precommit              # archive closed issues, unarchive open ones, index
+glo-notes precommit              # archive closed and iceboxed issues, index
 glo-notes <zk-cmd>               # pass through to zk with ZK_NOTEBOOK_DIR=base/
 ```
 
 Notes layout:
 
-- `base/issue/`: issue notes; closed issues are archived by `glo-notes precommit`.
+- `base/issue/`: open and in-progress issue notes.
+- `base/issue/archive/`: completed closed issues and deferred iceboxed issues;
+  resuming an iceboxed issue restores it to `base/issue/`.
 - `base/wiki/`: project wiki notes.
 - `base/**/TITLES.md`: generated title index.
 - `base/**/TAGS.md`: generated tag index.
@@ -257,4 +276,6 @@ glo-agent precommit
 glo-agent focus close
 ```
 
-If work is incomplete, leave the issue open and add a note with the blocker or next step.
+If work is incomplete, leave the issue open and add a note with the blocker or
+next step. If it is intentionally deferred and should leave active queues, add
+a note and run `glo-agent focus icebox`.

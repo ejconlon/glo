@@ -26,13 +26,14 @@ _gen_titles() {
 .mode list
 SELECT '# Note Titles Index
 
-All notes sorted alphabetically by title.
-
-';
-SELECT '- [' || title || '](' || path || ')'
-FROM notes
-${where_clause}
-ORDER BY title COLLATE NOCASE;
+All notes sorted alphabetically by title.' ||
+       COALESCE(char(10) || char(10) || group_concat(link, char(10)), '')
+FROM (
+    SELECT '- [' || title || '](' || path || ')' AS link
+    FROM notes
+    ${where_clause}
+    ORDER BY title COLLATE NOCASE
+);
 SQL
 }
 
@@ -47,9 +48,7 @@ _gen_tags() {
 import sqlite3
 conn = sqlite3.connect('${ZK_DB}')
 cursor = conn.cursor()
-print("# Tags Index\n")
-print("All notes organized by tags.\n")
-cursor.execute("""
+rows = cursor.execute("""
     SELECT c.name as tag, n.title, n.path
     FROM collections c
     JOIN notes_collections nc ON c.id = nc.collection_id
@@ -58,16 +57,16 @@ cursor.execute("""
       AND n.path NOT LIKE '%/archive/%'
       ${path_condition}
     ORDER BY c.name, n.title COLLATE NOCASE
-""")
+""").fetchall()
+lines = ["# Tags Index", "", "All notes organized by tags."]
 current_tag = None
-for row in cursor:
+for row in rows:
     tag, title, path = row
     if tag != current_tag:
-        if current_tag is not None:
-            print()
-        print(f"## {tag}\n")
+        lines.extend(["", f"## {tag}", ""])
         current_tag = tag
-    print(f"- [{title}]({path})")
+    lines.append(f"- [{title}]({path})")
+print("\n".join(lines))
 conn.close()
 PYEOF
 }
@@ -130,29 +129,29 @@ cmd_precommit() {
     local count status filepath
 
     if [[ -d "$issue_dir" ]]; then
-        echo "[I] Checking for closed issues to archive..."
+        echo "[I] Checking for closed or iceboxed issues to archive..."
         count=0
         while IFS= read -r -d '' filepath; do
             [[ "$filepath" == *"/archive/"* ]] && continue
             [[ "$(basename "$filepath")" == "TITLES.md" ]] && continue
             [[ "$(basename "$filepath")" == "TAGS.md" ]] && continue
             status="$(_extract_frontmatter_field "$filepath" status)"
-            if [[ "$status" == "closed" ]]; then
+            if [[ "$status" == "closed" || "$status" == "icebox" ]]; then
                 _archive_file "$filepath"
                 ((count++)) || true
             fi
         done < <(find "$issue_dir" -name "*.md" -type f -print0 2>/dev/null)
-        [[ $count -gt 0 ]] && echo "[I] Archived $count closed issue(s)"
+        [[ $count -gt 0 ]] && echo "[I] Archived $count closed or iceboxed issue(s)"
     fi
 
     if [[ -d "$archive_dir" ]]; then
-        echo "[I] Checking for non-closed issues in archive..."
+        echo "[I] Checking for resumed issues in archive..."
         count=0
         while IFS= read -r -d '' filepath; do
             [[ "$(basename "$filepath")" == "TITLES.md" ]] && continue
             [[ "$(basename "$filepath")" == "TAGS.md" ]] && continue
             status="$(_extract_frontmatter_field "$filepath" status)"
-            if [[ "$status" != "closed" ]]; then
+            if [[ "$status" != "closed" && "$status" != "icebox" ]]; then
                 _unarchive_file "$filepath"
                 ((count++)) || true
             fi
@@ -170,7 +169,7 @@ usage() {
     echo "" >&2
     echo "Commands:" >&2
     echo "  index       Update zk index and regenerate TITLES.md / TAGS.md" >&2
-    echo "  precommit   Archive closed issues, then run index" >&2
+    echo "  precommit   Archive closed/iceboxed issues, then run index" >&2
     echo "  <zk-cmd>    Passed through to zk with ZK_NOTEBOOK_DIR=base/" >&2
     exit 1
 }

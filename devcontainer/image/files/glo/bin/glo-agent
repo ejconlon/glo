@@ -31,12 +31,17 @@ issue() {
 resolve_ticket() {
     local id="$1"
     local exact="${TICKETS_DIR}/${id}.md"
+    local archived_exact="${TICKETS_DIR}/archive/${id}.md"
     if [[ -f "$exact" ]]; then
         echo "$exact"
         return 0
     fi
+    if [[ -f "$archived_exact" ]]; then
+        echo "$archived_exact"
+        return 0
+    fi
     local matches
-    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" 2>/dev/null | head -2)
+    matches=$(find "$TICKETS_DIR" -maxdepth 2 -name "*${id}*.md" 2>/dev/null | head -2)
     local count
     count=$(echo "$matches" | grep -c . || true)
     if [[ "$count" -eq 1 ]]; then
@@ -233,7 +238,7 @@ cmd_focus() {
         echo "Error: focus requires AGENT_NAME" >&2; return 1
     fi
     if [[ $# -lt 1 ]]; then
-        echo "Usage: glo-agent focus {push|pop|list|create|ready|get|show|close|add-note|block|link|unlink} [args...]" >&2
+        echo "Usage: glo-agent focus {push|pop|list|create|ready|get|show|icebox|close|add-note|block|link|unlink} [args...]" >&2
         return 1
     fi
     clean_focus_stack
@@ -246,7 +251,7 @@ cmd_focus() {
         ready)  cmd_focus_ready "$@" ;;
         get)    cmd_get_focus "$@" ;;
         show)   cmd_show_focus "$@" ;;
-        close|add-note|block|link|unlink)
+        icebox|close|add-note|block|link|unlink)
             local fid
             fid=$(cmd_get_focus) || return 1
             "cmd_${sub//-/_}" "$fid" "$@"
@@ -307,6 +312,41 @@ cmd_close() {
     if [[ -n "$AGENT_DIR" && -f "${AGENT_DIR}/focus" ]]; then
         local full_id
         full_id=$(basename "$(resolve_ticket "${args[0]}")" .md)
+        local tmp="${AGENT_DIR}/focus.tmp.$$"
+        grep -v "^${full_id}$" "${AGENT_DIR}/focus" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "${AGENT_DIR}/focus"
+    fi
+}
+
+cmd_icebox() {
+    local force=""
+    local args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force) force="--force"; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    if [[ ${#args[@]} -lt 1 ]]; then
+        echo "Usage: glo-agent issue icebox <id> [--force]" >&2
+        return 1
+    fi
+    local id="${args[0]}"
+    if [[ -n "${AGENT_NAME:-}" && "$force" != "--force" ]]; then
+        local file
+        file=$(resolve_ticket "$id") || return 1
+        local assignee
+        assignee=$(ticket_assignee "$file")
+        if [[ "$assignee" != "$AGENT_NAME" ]]; then
+            echo "Error: issue '$id' not assigned to '${AGENT_NAME}'. Use --force to override." >&2
+            return 1
+        fi
+    fi
+    issue icebox "$id"
+    # Iceboxed work is no longer active focus.
+    if [[ -n "$AGENT_DIR" && -f "${AGENT_DIR}/focus" ]]; then
+        local full_id
+        full_id=$(basename "$(resolve_ticket "$id")" .md)
         local tmp="${AGENT_DIR}/focus.tmp.$$"
         grep -v "^${full_id}$" "${AGENT_DIR}/focus" > "$tmp" 2>/dev/null || true
         mv "$tmp" "${AGENT_DIR}/focus"
@@ -374,7 +414,7 @@ cmd_lsi() {
         d = desc; if (length(d) > 50) d = substr(d, 1, 47) "..."
         descs[n] = d
         epochs[n] = parse_iso(created)
-        sort_a[n] = (status == "closed") ? 2 : 1
+        sort_a[n] = (status == "closed") ? 3 : ((status == "icebox") ? 2 : 1)
     }
 
     function parse_iso(s,    y,m,d,H,M,S) {
@@ -396,7 +436,7 @@ cmd_lsi() {
 
     END {
         if (prev_file) store()
-        # Insertion sort by (closed_rank asc, priority asc, epoch desc)
+        # Insertion sort by (active/icebox/closed rank, priority, epoch desc)
         for (i = 1; i <= n; i++) order[i] = i
         for (i = 2; i <= n; i++) {
             tmp = order[i]
@@ -584,7 +624,7 @@ cmd_create() {
 
 cmd_issue() {
     if [[ $# -lt 1 ]]; then
-        echo "Usage: glo-agent issue {list|create|ready|blocked|start|close|pause|show|add-note|block|link|unlink|assign|unassign} [args...]" >&2
+        echo "Usage: glo-agent issue {list|create|ready|blocked|start|icebox|close|pause|show|add-note|block|link|unlink|assign|unassign} [args...]" >&2
         return 1
     fi
     local sub="$1"; shift
@@ -594,6 +634,7 @@ cmd_issue() {
         ready)      cmd_ready "$@" ;;
         blocked)    cmd_blocked "$@" ;;
         start)      cmd_start "$@" ;;
+        icebox)     cmd_icebox "$@" ;;
         close)      cmd_close "$@" ;;
         pause)      cmd_pause "$@" ;;
         show)       issue show "$@" ;;
@@ -622,7 +663,7 @@ Track your current work with focus subcommands:
   focus ready                 Push next ready issue onto stack
   focus get                   Print current focus ID
   focus show                  Show current focus issue
-  focus <cmd> [args]          Run cmd with focused ID (close, add-note, block, link, unlink)
+  focus <cmd> [args]          Run cmd with focused ID (icebox, close, add-note, block, link, unlink)
 
 Manage issues directly with issue subcommands:
   issue list                     Table of all issues
@@ -630,6 +671,7 @@ Manage issues directly with issue subcommands:
   issue ready [--all]            List ready issues (assigned to you)
   issue blocked [--all]          List blocked issues (assigned to you)
   issue start <id> [--force]     Start issue (in_progress + assignee)
+  issue icebox <id> [--force]    Defer incomplete issue and remove it from focus
   issue close <id> [--force]     Close issue (assigned-only)
   issue pause <id> [--force]     Pause issue (open, remove from stack)
   issue show <id>                Display issue

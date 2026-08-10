@@ -65,7 +65,9 @@ T1=$(bin/glo-issue create "Bootstrap ticket")
 T2=$(bin/glo-issue create "Second ticket")
 T3=$(bin/glo-issue create "Blocker")
 T4=$(bin/glo-issue create "Blocked by T3")
-ok "created $T1  $T2  $T3  $T4"
+T5=$(bin/glo-issue create "Iceboxed ticket")
+T6=$(bin/glo-issue create "Blocked by iceboxed ticket")
+ok "created $T1  $T2  $T3  $T4  $T5  $T6"
 
 step "glo-issue: ls / show"
 bin/glo-issue ls | grep -q "$T1"
@@ -81,13 +83,26 @@ bin/glo-issue close "$T1"
 bin/glo-issue ls --status=closed | grep -q "$T1"
 ok "start / add-note / close"
 
+step "glo-issue: icebox / resume"
+bin/glo-issue icebox "$T5"
+bin/glo-issue ls --status=icebox | grep -q "$T5"
+! bin/glo-issue ready | grep -q "$T5"
+! bin/glo-issue blocked | grep -q "$T5"
+bin/glo-issue start "$T5"
+bin/glo-issue ls --status=in_progress | grep -q "$T5"
+bin/glo-issue status "$T5" icebox
+ok "icebox / resume"
+
 step "glo-issue: dep / blocked / ready"
 bin/glo-issue dep "$T4" "$T3"
+bin/glo-issue dep "$T6" "$T5"
 bin/glo-issue blocked | grep -q "$T4"
+bin/glo-issue blocked | grep -q "$T6"
 bin/glo-issue ready   | grep -q "$T2"
 bin/glo-issue close "$T3"
 bin/glo-issue ready   | grep -q "$T4"
-ok "dep / blocked / ready"
+bin/glo-issue blocked | grep -q "$T6"
+ok "dep / blocked / ready (icebox remains incomplete)"
 
 step "glo-issue: link / dep tree"
 bin/glo-issue link "$T2" "$T4"
@@ -141,6 +156,41 @@ bin/glo-agent focus push "$A2"
 bin/glo-agent focus pop
 [[ "$(bin/glo-agent focus list)" == "(empty)" ]]
 ok "push / pop"
+
+step "glo-agent: focus icebox / resume"
+A3=$(bin/glo-agent issue create "Agent icebox task")
+bin/glo-agent focus push "$A3"
+bin/glo-agent focus icebox
+[[ "$(bin/glo-agent focus list)" == "(empty)" ]]
+bin/glo-issue ls --status=icebox | grep -q "$A3"
+bin/glo-agent issue start "$A3"
+bin/glo-agent issue icebox "$A3"
+bin/glo-issue ls --status=icebox | grep -q "$A3"
+ok "focus icebox / resume"
+
+step "glo-notes: archive closed and icebox / resume icebox"
+N_CLOSED=$(bin/glo-issue create "Archived completed ticket")
+N_ICEBOX=$(bin/glo-issue create "Archived icebox ticket")
+bin/glo-issue close "$N_CLOSED"
+bin/glo-issue icebox "$N_ICEBOX"
+bin/glo-notes precommit
+[[ -f "base/issue/archive/${N_CLOSED}.md" ]]
+[[ -f "base/issue/archive/${N_ICEBOX}.md" ]]
+[[ ! -f "base/issue/${N_ICEBOX}.md" ]]
+[[ "$(tail -c 2 base/issue/TITLES.md | od -An -t x1)" != " 0a 0a" ]]
+[[ "$(tail -c 2 base/issue/TAGS.md | od -An -t x1)" != " 0a 0a" ]]
+bin/glo-issue show "$N_ICEBOX" | grep -q '^status: icebox$'
+bin/glo-issue reopen "$N_ICEBOX"
+[[ -f "base/issue/${N_ICEBOX}.md" ]]
+[[ ! -f "base/issue/archive/${N_ICEBOX}.md" ]]
+bin/glo-issue ls --status=open | grep -q "$N_ICEBOX"
+bin/glo-agent focus push "$A3"
+[[ -f "base/issue/${A3}.md" ]]
+bin/glo-agent focus icebox
+bin/glo-notes precommit
+[[ -f "base/issue/archive/${A3}.md" ]]
+[[ ! -f "base/issue/${A3}.md" ]]
+ok "archive closed and icebox / resume icebox"
 
 echo
 echo "=== All checks passed ==="

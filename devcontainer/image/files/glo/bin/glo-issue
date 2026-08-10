@@ -76,15 +76,20 @@ ensure_dir() {
 ticket_path() {
     local id="$1"
     local exact="$TICKETS_DIR/${id}.md"
+    local archived_exact="$TICKETS_DIR/archive/${id}.md"
 
     if [[ -f "$exact" ]]; then
         echo "$exact"
         return 0
     fi
+    if [[ -f "$archived_exact" ]]; then
+        echo "$archived_exact"
+        return 0
+    fi
 
-    # Try partial match (anywhere in filename)
+    # Try partial match in active and archived issues (anywhere in filename).
     local matches
-    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" 2>/dev/null | head -2)
+    matches=$(find "$TICKETS_DIR" -maxdepth 2 -name "*${id}*.md" 2>/dev/null | head -2)
     local count
     count=$(echo "$matches" | _grep -c . || true)
 
@@ -205,7 +210,7 @@ cmd_create() {
 }
 
 # Valid statuses
-VALID_STATUSES="open in_progress closed"
+VALID_STATUSES="open in_progress icebox closed"
 
 validate_status() {
     local status="$1"
@@ -232,6 +237,16 @@ cmd_status() {
     file=$(ticket_path "$id") || return 1
 
     update_yaml_field "$file" "status" "$status"
+    if [[ "$file" == "$TICKETS_DIR/archive/"* \
+        && ( "$status" == "open" || "$status" == "in_progress" ) ]]; then
+        local active_file="$TICKETS_DIR/$(basename "$file")"
+        if [[ -e "$active_file" ]]; then
+            echo "Error: cannot resume archived issue; active file already exists: $active_file" >&2
+            return 1
+        fi
+        mv "$file" "$active_file"
+        file="$active_file"
+    fi
     echo "Updated $(basename "$file" .md) -> $status"
 }
 
@@ -249,6 +264,14 @@ cmd_close() {
         return 1
     fi
     cmd_status "$1" "closed"
+}
+
+cmd_icebox() {
+    if [[ $# -lt 1 ]]; then
+        echo "Usage: $(basename "$0") icebox <id>" >&2
+        return 1
+    fi
+    cmd_status "$1" "icebox"
 }
 
 cmd_reopen() {
@@ -1386,9 +1409,10 @@ Commands:
     --parent               Parent ticket ID
     --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
+  icebox <id>              Set status to icebox (deferred, incomplete)
   close <id>               Set status to closed
   reopen <id>              Set status to open
-  status <id> <status>     Update status (open|in_progress|closed)
+  status <id> <status>     Update status (open|in_progress|icebox|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] <id>   Show dependency tree (--full disables dedup)
   dep cycle                Find dependency cycles in open tickets
@@ -1414,6 +1438,7 @@ EOF
 case "${1:-help}" in
     create) shift; cmd_create "$@" ;;
     start)  shift; cmd_start "$@" ;;
+    icebox) shift; cmd_icebox "$@" ;;
     close)  shift; cmd_close "$@" ;;
     reopen) shift; cmd_reopen "$@" ;;
     status) shift; cmd_status "$@" ;;
