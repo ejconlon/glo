@@ -11,7 +11,7 @@ case "${1:-}" in
     gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
     local)     shift; exec "${_GLO_BIN_DIR}/glo-local" "$@" ;;
     notes)     shift; exec "${_GLO_BIN_DIR}/glo-notes" "$@" ;;
-    opencode)  shift; exec "${_GLO_BIN_DIR}/glo-opencode" "$@" ;;
+    secrets)   shift; exec "${_GLO_BIN_DIR}/glo-secrets" "$@" ;;
     readme)    cat "$README" ;;
     help|--help|-h)
         cat <<EOF
@@ -26,12 +26,12 @@ Commands:
   gen        Generate a lib component from a template (glo-gen --help)
   local      Install host dependencies (glo-local --help)
   notes      zk notebook wrapper for base/ (glo-notes --help)
-  opencode   Opencode devcontainer helper (glo-opencode --help)
+  secrets    Manage a local KDBX database through SecretSpec
   readme     Print full documentation
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|gen|local|notes|opencode|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|gen|local|notes|secrets|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

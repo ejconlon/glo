@@ -58,6 +58,7 @@ fi
 # the devcontainer, where the image-provided tools live under /opt/glo/bin.
 mkdir -p "${WORKSPACE_DIR}/bin"
 for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*; do
+    [[ -f "$script" ]] || continue
     name="$(basename "$script")"
     dest="${WORKSPACE_DIR}/bin/${name}"
     if [[ ! -e "$dest" || -L "$dest" ]] || grep -q "exec /opt/glo/bin/${name}" "$dest" 2>/dev/null; then
@@ -66,6 +67,18 @@ for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*; do
         cat > "$dest" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+EOF
+
+        if [[ "$name" == "glo-secrets" ]]; then
+            cat >> "$dest" <<EOF
+
+glo_secrets_data_root="\${XDG_DATA_HOME:-\${HOME}/.local/share}"
+export GLO_SECRETS_PROVIDER="\${GLO_SECRETS_PROVIDER:-${PROJECT_NAME}}"
+export GLO_SECRETS_DATABASE="\${GLO_SECRETS_DATABASE:-\${glo_secrets_data_root}/${PROJECT_NAME}/${PROJECT_NAME}.kdbx}"
+EOF
+        fi
+
+        cat >> "$dest" <<EOF
 
 if [[ -x /opt/glo/bin/${name} ]]; then
     exec /opt/glo/bin/${name} "\$@"

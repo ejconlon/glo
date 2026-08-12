@@ -256,15 +256,52 @@ glo-local doctor                  # show detected OS/arch and installed tools
 glo-local --dry-run all           # print install commands without running them
 glo-local base                    # common CLI tools
 glo-local py                      # Python and uv
-glo-local rs                      # Rust 1.95.0 + rustfmt/clippy/rust-analyzer/rust-src
-glo-local hs                      # GHC 9.12.4, cabal 3.16.1.0, stack 3.9.3, HLS 2.14.0.0, ormolu, hlint via ghcup
+glo-local rs                      # Rust 1.97.1 + rustfmt/clippy/rust-analyzer/rust-src
+glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, ormolu, hlint via ghcup
 glo-local wasm                    # wasm32-wasi GHC, wasm32-wasi-cabal, wasmtime, binaryen
 glo-local ts                      # Node/npm
 glo-local ps                      # PureScript tooling via npm
 glo-local notes                   # zk/sqlite
+glo-local secretspec              # checksummed Apache-2.0 SecretSpec release
 ```
 
 `glo local ...` is equivalent to `glo-local ...`.
+
+### Local KDBX credentials
+
+`glo-secrets` is a foreground wrapper around SecretSpec's built-in KDBX and
+keyring providers. It does not install a service, broker, socket, systemd unit,
+TPM helper, or devcontainer integration.
+
+First choose a user-level alias and KDBX path. Initialization configures the
+alias and asks SecretSpec to store the database master password in one
+alias-specific entry in the operating system's standard keychain:
+
+```sh
+glo-secrets --provider local init \
+  --database "$HOME/.local/share/example/example.kdbx" \
+  --file lib/example/secretspec.toml
+```
+
+The KDBX file is created on the first `put`. Values are prompted for rather
+than accepted in command arguments:
+
+```sh
+glo-secrets --provider local put \
+  --file lib/example/secretspec.toml API_TOKEN
+glo-secrets --provider local check \
+  --file lib/example/secretspec.toml --scope runtime
+glo-secrets --provider local build /lib/example serve
+```
+
+The alias is selected at runtime and lives in the user's SecretSpec
+configuration, so checked-in component manifests remain provider neutral. The
+keychain must be available in the environment where the command runs; Glo does
+not expose a host keychain or D-Bus session inside a container. `build` requires
+one concrete `/lib/...` project with both `build.json` and `secretspec.toml`,
+exports that manifest and the provider, then forwards its arguments to
+`glo-build`. Use `run` when SecretSpec must materialize the selected scope for a
+child that has no SDK integration.
 
 ## When Finishing Work
 

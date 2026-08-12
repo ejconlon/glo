@@ -29,7 +29,6 @@ Examples:
     glo-build precommit
     glo-build /py ^/py/core precommit  # All Python projects except core
     glo-build precommit ^test          # Precommit without running tests
-    glo-build /py/web dev --port 9000
     glo-build precommit -- -k test_foo # Pass -k to test subtarget
     glo-build --dryrun /py/core precommit
 """
@@ -88,55 +87,6 @@ def log_info(msg: str) -> None:
 def log_warn(msg: str) -> None:
     """Print warning message with yellow [W] tag."""
     print(f"{YELLOW}[W]{RESET} {msg}")
-
-
-def get_git_info() -> dict[str, str]:
-    """Capture git info at plan time for embedding in build scripts.
-
-    Returns dict with: sha, sha_short, branch, dirty (all strings).
-    Returns "unknown" for values that can't be determined.
-    """
-    info = {
-        "sha": "unknown",
-        "sha_short": "unknown",
-        "branch": "unknown",
-        "dirty": "true",
-    }
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            info["sha"] = result.stdout.strip()
-            info["sha_short"] = info["sha"][:7]
-    except subprocess.TimeoutExpired, FileNotFoundError:
-        pass
-    try:
-        result = subprocess.run(
-            ["git", "branch", "--show-current"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            info["branch"] = result.stdout.strip() or "unknown"
-    except subprocess.TimeoutExpired, FileNotFoundError:
-        pass
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            info["dirty"] = "true" if result.stdout.strip() else "false"
-    except subprocess.TimeoutExpired, FileNotFoundError:
-        pass
-    return info
 
 
 # ---------------------------------------------------------------------------
@@ -969,11 +919,6 @@ class Project:
         rs_venv = script.workspace_path(self.venv_path)
         script.export("CARGO_TARGET_DIR", f"{rs_venv}/target")
         script.export("RS_VENV", rs_venv)
-        script.raw(
-            "if command -v glo-cargo-run-bin >/dev/null 2>&1; then "
-            'export GLO_CARGO_RUN_BIN="$(command -v glo-cargo-run-bin)"; '
-            'else export GLO_CARGO_RUN_BIN="${WORKSPACE}/submodules/glo/devcontainer/image/files/glo/bin/glo-cargo-run-bin"; fi'
-        )
 
     def emit_cargo(self, script: Script, args: list[str]) -> None:
         """Emit a cargo command for Rust builds."""
@@ -1074,6 +1019,7 @@ class Command:
     handlers: dict[Lang | None, CommandHandler] = field(default_factory=dict)
     project_only: bool = False  # True if this command only works on projects
     root_only: bool = False  # True if this command only works at root level
+    custom_only: bool = False  # True when projects must declare their own target
     subtargets: tuple[str, ...] = ()  # For meta-commands: run these in sequence
 
     def get_handler(self, lang: Lang) -> CommandHandler | None:
@@ -1135,6 +1081,11 @@ def meta_command(
         root_only=root_only,
         subtargets=tuple(subtargets),
     )
+
+
+def custom_only_command(name: str, help: str) -> None:  # noqa: A002
+    """Register a target name whose implementation must come from build.json."""
+    COMMANDS[name] = Command(name=name, help=help, custom_only=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1230,303 +1181,6 @@ def cmd_repl_py(script: Script, project: Project, args: list[str]) -> None:
     del args  # unused
     script.info(f"Starting REPL for {project.path}")
     project.emit_python(script, [])
-
-
-@command("pypackage", "Package project into distributable zip", lang=Lang.Python)
-def cmd_pypackage_py(script: Script, project: Project, args: list[str]) -> None:
-    """Package a Python project into a distributable zip with dependencies.
-
-    Creates a zip file containing:
-    - All production dependencies
-    - The project's source code
-    - Workspace dependency sources
-    - build_info.json with git metadata
-    - entrypoint.sh for execution
-
-    Args (via command line):
-        --debug: Preserve .py source files (default: compile to .pyc and remove sources)
-        [destination]: Optional output path (default: .build/<package_name>.zip)
-    """
-    package_name = project.package_name
-    project_path = script.workspace_path(project.abs_path)
-    venv_python = script.workspace_path(project.python)
-
-    # Parse args
-    debug = "--debug" in args
-    destination = None
-    for arg in args:
-        if arg != "--debug" and not arg.startswith("-"):
-            destination = arg
-            break
-
-    script.info(f"Packaging {project.path}")
-
-    # Check venv exists
-    script.raw(f"if [ ! -x {shquote(venv_python)} ]; then")
-    script.raw(f"    echo 'Virtual environment not found at {venv_python}' >&2")
-    script.raw(f"    echo 'Please run: {cli_invocation()} venv' >&2")
-    script.raw("    exit 1")
-    script.raw("fi")
-
-    # Check package directory exists
-    script.raw(f"if [ ! -d {shquote(project_path)}/{shquote(package_name)} ]; then")
-    script.raw(
-        f"    echo 'Package directory {project_path}/{package_name} does not exist' >&2"
-    )
-    script.raw("    exit 1")
-    script.raw("fi")
-
-    # Set destination
-    if destination:
-        if destination.startswith("/"):
-            dest_path = destination
-        else:
-            dest_path = "${WORKSPACE}/" + destination
-    else:
-        dest_path = f"${{WORKSPACE}}/.build/{package_name}.zip"
-
-    # Create temp directory
-    script.raw('PACKAGE_TEMP_DIR="$(mktemp -d)"')
-    script.raw("trap 'rm -rf \"$PACKAGE_TEMP_DIR\"' EXIT")
-    script.raw(f'ASSEMBLY_DIR="${{PACKAGE_TEMP_DIR}}/{package_name}"')
-    script.raw('mkdir -p "$ASSEMBLY_DIR"')
-
-    # Export production dependencies
-    script.info("Exporting production dependencies")
-    script.pushd(project_path)
-    script.raw(
-        "uv export --project . --no-dev --no-editable --no-emit-project "
-        "--no-emit-workspace --no-hashes --frozen "
-        '--output-file "$PACKAGE_TEMP_DIR/requirements.txt"'
-    )
-
-    # Fix wheel paths if wheels directory exists
-    script.raw('WHEELS_ABS="${WORKSPACE}/wheels"')
-    script.raw('if [[ -d "$WHEELS_ABS" ]]; then')
-    script.raw(
-        '    sed -i "s|../../wheels|$WHEELS_ABS|g" "$PACKAGE_TEMP_DIR/requirements.txt"'
-    )
-    script.raw("fi")
-
-    # Handle .packageignore if present
-    script.raw(f"if [ -f {shquote(project_path)}/.packageignore ]; then")
-    script.raw('    echo "[I] Found .packageignore, filtering dependencies"')
-    script.raw(
-        "    BLACKLIST=$(grep -v '^#' "
-        f"{shquote(project_path)}/.packageignore | grep -v '^[[:space:]]*$' || true)"
-    )
-    script.raw('    if [ -n "$BLACKLIST" ]; then')
-    script.raw(
-        '        BLACKLIST_PATTERN=$(echo "$BLACKLIST" | '
-        "sed 's/^/^/' | sed 's/$/==/' | paste -sd'|' -)"
-    )
-    script.raw(
-        '        grep -vE "$BLACKLIST_PATTERN" "$PACKAGE_TEMP_DIR/requirements.txt" '
-        '> "$PACKAGE_TEMP_DIR/requirements_filtered.txt"'
-    )
-    script.raw(
-        '        uv pip install --link-mode=copy --target "$ASSEMBLY_DIR" '
-        '--no-deps -r "$PACKAGE_TEMP_DIR/requirements_filtered.txt"'
-    )
-    script.raw("    else")
-    script.raw(
-        '        uv pip install --link-mode=copy --target "$ASSEMBLY_DIR" '
-        '-r "$PACKAGE_TEMP_DIR/requirements.txt"'
-    )
-    script.raw("    fi")
-    script.raw("else")
-    script.info("Installing dependencies to package directory")
-    script.raw(
-        '    uv pip install --link-mode=copy --target "$ASSEMBLY_DIR" '
-        '-r "$PACKAGE_TEMP_DIR/requirements.txt"'
-    )
-    script.raw("fi")
-
-    # Install workspace dependencies
-    script.raw(
-        f'if grep -q "workspace = true" {shquote(project_path)}/pyproject.toml 2>/dev/null; then'
-    )
-    script.raw('    echo "[I] Installing workspace dependencies"')
-    script.raw(
-        f"    WORKSPACE_DEPS=$(grep 'workspace = true' "
-        f"{shquote(project_path)}/pyproject.toml | awk '{{print $1}}')"
-    )
-    script.raw("    for DEP in $WORKSPACE_DEPS; do")
-    script.raw(
-        '        DEP_DIR=$(find "${WORKSPACE}/lib" -maxdepth 2 -name "pyproject.toml" '
-        '-exec grep -l "name = \\"$DEP\\"" {} \\; 2>/dev/null | head -1 | xargs dirname 2>/dev/null || true)'
-    )
-    script.raw('        if [ -n "$DEP_DIR" ] && [ -d "$DEP_DIR" ]; then')
-    script.raw('            echo "[I] Installing workspace dependency: $DEP"')
-    script.raw(
-        '            uv pip install --link-mode=copy --target "$ASSEMBLY_DIR" "$DEP_DIR"'
-    )
-    script.raw("        fi")
-    script.raw("    done")
-    script.raw("fi")
-
-    # Install the project itself (no deps)
-    script.info(f"Installing {package_name} to package directory")
-    script.raw(
-        f'uv pip install --link-mode=copy --target "$ASSEMBLY_DIR" '
-        f"--no-deps {shquote(project_path)}"
-    )
-
-    # Copy source code
-    script.info("Copying source code to package directory")
-    script.raw(
-        f'cp -r {shquote(project_path)}/{shquote(package_name)} "$ASSEMBLY_DIR/"'
-    )
-
-    # Copy workspace dependency sources by looking for .pth files pointing to workspace
-    script.raw('echo "[I] Copying workspace dependency source code from .pth files"')
-    script.raw('for PTH_FILE in "$ASSEMBLY_DIR"/_*.pth; do')
-    script.raw('    [ -f "$PTH_FILE" ] || continue')
-    script.raw('    PTH_TARGET=$(cat "$PTH_FILE")')
-    script.raw("    # Check if .pth points to a workspace lib directory")
-    script.raw('    if [[ "$PTH_TARGET" == */lib/* ]]; then')
-    script.raw('        PKG_NAME=$(basename "$PTH_FILE" .pth | sed "s/^_//")')
-    script.raw('        if [ -d "$PTH_TARGET/$PKG_NAME" ]; then')
-    script.raw('            echo "[I] Copying workspace dependency source: $PKG_NAME"')
-    script.raw('            cp -r "$PTH_TARGET/$PKG_NAME" "$ASSEMBLY_DIR/"')
-    script.raw("        fi")
-    script.raw("    fi")
-    script.raw("done")
-    script.raw("# Remove .pth files as we now have the actual source")
-    script.raw('rm -f "$ASSEMBLY_DIR"/_*.pth 2>/dev/null || true')
-
-    # Clean up unnecessary files
-    script.info("Cleaning up unnecessary files")
-    script.raw('rm -f "$ASSEMBLY_DIR"/.lock 2>/dev/null || true')
-    script.raw('rm -rf "$ASSEMBLY_DIR"/include 2>/dev/null || true')
-    script.raw('rm -rf "$ASSEMBLY_DIR"/bin 2>/dev/null || true')
-
-    # Compile to .pyc and remove sources in non-debug builds
-    if not debug:
-        script.info("Compiling .py files to .pyc for internal packages")
-        # Compile main package and any glo_* workspace dependencies
-        script.raw(
-            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/glo_*; do'
-        )
-        script.raw('    if [ -d "$PKG_DIR" ]; then')
-        script.raw('        DIR_NAME=$(basename "$PKG_DIR")')
-        script.raw('        PY_COUNT=$(find "$PKG_DIR" -type f -name "*.py" | wc -l)')
-        script.raw('        if [ "$PY_COUNT" -gt 0 ]; then')
-        script.raw('            echo "[I] Compiling $PY_COUNT .py files in $DIR_NAME"')
-        script.raw(
-            f'            {shquote(venv_python)} -m compileall -b -q -o 2 "$PKG_DIR"'
-        )
-        script.raw("        fi")
-        script.raw("    fi")
-        script.raw("done")
-
-        script.info("Removing .py source files from internal packages")
-        script.raw(
-            f'for PKG_DIR in "$ASSEMBLY_DIR"/{shquote(package_name)} "$ASSEMBLY_DIR"/glo_*; do'
-        )
-        script.raw('    if [ -d "$PKG_DIR" ]; then')
-        script.raw('        find "$PKG_DIR" -type f -name "*.py" -delete')
-        script.raw(
-            '        find "$PKG_DIR" -type d -name "__pycache__" '
-            "-exec rm -rf {} + 2>/dev/null || true"
-        )
-        script.raw("    fi")
-        script.raw("done")
-    else:
-        script.info("Preserving .py source files (debug build)")
-
-    # Create build_info.json (git info captured at plan time)
-    script.info("Creating build_info.json")
-    debug_str = "true" if debug else "false"
-    git_info = get_git_info()
-    script.raw('BUILD_TIME="$(date -u +"%Y%m%dT%H%M%S")"')
-    script.raw(
-        "printf '%s\\n' "
-        "'{' "
-        f'\'  "package_name": "{package_name}",\' '
-        f'\'  "project_name": "{project.name}",\' '
-        f'\'  "project_path": "{project.path.lstrip("/")}",\' '
-        '\'  "project_type": "py",\' '
-        f'\'  "git_sha": "{git_info["sha"]}",\' '
-        f'\'  "git_sha_short": "{git_info["sha_short"]}",\' '
-        f'\'  "git_branch": "{git_info["branch"]}",\' '
-        '\'  "build_time": "\'"$BUILD_TIME"\'",\' '
-        f"'  \"git_dirty\": {git_info['dirty']},' "
-        f'\'  "date_with_sha": "\'"$BUILD_TIME"\'_{git_info["sha_short"]},\' '
-        f"'  \"debug\": {debug_str}' "
-        "'}' > \"$ASSEMBLY_DIR/build_info.json\""
-    )
-
-    # Create entrypoint.sh
-    script.info("Checking for entrypoint")
-    script.raw(f"if [ -f {shquote(project_path)}/entrypoint.sh ]; then")
-    script.raw('    echo "[I] Found existing entrypoint.sh, copying it"')
-    script.raw(f'    cp {shquote(project_path)}/entrypoint.sh "$ASSEMBLY_DIR/"')
-    script.raw('    chmod +x "$ASSEMBLY_DIR/entrypoint.sh"')
-    script.raw(
-        f"elif [ -f {shquote(project_path)}/{shquote(package_name)}/main.py ]; then"
-    )
-    script.raw(f'    echo "[I] Creating entrypoint.sh for {package_name}.main"')
-    # Use printf to avoid heredoc indentation issues
-    script.raw(
-        "printf '%s\\n' "
-        "'#!/usr/bin/env bash' "
-        "'set -euo pipefail' "
-        '\'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\' '
-        "'cd \"${SCRIPT_DIR}\"' "
-        "'export PYTHONPATH=\"${SCRIPT_DIR}:${PYTHONPATH:-}\"' "
-        f"'exec python3 -m {package_name}.main \"$@\"' "
-        '> "$ASSEMBLY_DIR/entrypoint.sh"'
-    )
-    script.raw('    chmod +x "$ASSEMBLY_DIR/entrypoint.sh"')
-    script.raw(
-        f"elif [ -f {shquote(project_path)}/{shquote(package_name)}/cli.py ]; then"
-    )
-    script.raw(f'    echo "[I] Creating entrypoint.sh for {package_name}.cli"')
-    # Use printf to avoid heredoc indentation issues
-    script.raw(
-        "printf '%s\\n' "
-        "'#!/usr/bin/env bash' "
-        "'set -euo pipefail' "
-        '\'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\' '
-        "'cd \"${SCRIPT_DIR}\"' "
-        "'export PYTHONPATH=\"${SCRIPT_DIR}:${PYTHONPATH:-}\"' "
-        f"'exec python3 -m {package_name}.cli \"$@\"' "
-        '> "$ASSEMBLY_DIR/entrypoint.sh"'
-    )
-    script.raw('    chmod +x "$ASSEMBLY_DIR/entrypoint.sh"')
-    script.raw("else")
-    script.raw(
-        f'    echo "[W] No entrypoint.sh, main.py, or cli.py found in {package_name}"'
-    )
-    script.raw('    echo "[W] Skipping entrypoint creation"')
-    script.raw("fi")
-
-    # Create zip file
-    script.info(f"Creating zip file: {package_name}.zip")
-    script.raw("(")
-    script.raw('    cd "$PACKAGE_TEMP_DIR"')
-    script.raw(
-        f'    zip -rq "${{PACKAGE_TEMP_DIR}}/{package_name}.zip" "{package_name}"'
-    )
-    script.raw(")")
-
-    # Create destination directory and copy
-    script.raw(f'mkdir -p "$(dirname {shquote(dest_path)})"')
-    script.raw(f'cp "${{PACKAGE_TEMP_DIR}}/{package_name}.zip" {shquote(dest_path)}')
-
-    script.info("Package created successfully")
-    script.raw(f'echo "[I] Output: {dest_path}"')
-    script.raw(f"ls -lh {shquote(dest_path)}")
-
-    script.popd()
-
-
-@command("pypackage", "Package project into distributable zip", lang=Lang.Purescript)
-def cmd_pypackage_ps(script: Script, project: Project, args: list[str]) -> None:
-    """Skip packaging for PureScript projects."""
-    del args  # unused
-    script.info(f"Skipping pypackage for {project.path} (PureScript)")
 
 
 # ---------------------------------------------------------------------------
@@ -1654,6 +1308,8 @@ def cmd_repl_ps(script: Script, project: Project, args: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+custom_only_command("gen", "Run explicitly configured code generation")
+custom_only_command("dist", "Build an explicitly configured distribution")
 meta_command("test", "Run all tests (typecheck + unit)", ["typecheck", "unit"])
 meta_command(
     "precommit",
@@ -1942,21 +1598,6 @@ def cmd_license_check_rs(script: Script, project: Project, args: list[str]) -> N
     script.info(f"License check for {project.path} (no-op)")
 
 
-@command(
-    "run-bin", "Run a project-pinned Rust binary", project_only=True, lang=Lang.Rust
-)
-def cmd_run_bin_rs(script: Script, project: Project, args: list[str]) -> None:
-    """Run a binary declared in [package.metadata.bin] via the project venv."""
-    if not args:
-        script.raw("echo 'usage: run-bin <tool> [args...]' >&2; exit 2")
-        return
-    path = script.workspace_path(project.abs_path)
-    is_new = script.enter_project(path)
-    if is_new:
-        project.emit_rs_env(script)
-    script.run(["${GLO_CARGO_RUN_BIN}"] + args)
-
-
 # ---------------------------------------------------------------------------
 # Common project commands - TypeScript
 # ---------------------------------------------------------------------------
@@ -2153,13 +1794,6 @@ def cmd_license_check_rocq(script: Script, project: Project, args: list[str]) ->
     script.info(f"License check for {project.path} (no-op)")
 
 
-@command("cli", "Run the project CLI", project_only=True, lang=Lang.Python)
-def cmd_cli(script: Script, project: Project, args: list[str]) -> None:
-    """Run the project CLI."""
-    script.info(f"Running CLI for {project.path}")
-    project.emit_python(script, ["-m", f"{project.package_name}.cli"], extra_args=args)
-
-
 @command("doc", "Generate documentation")
 def cmd_doc(script: Script, project: Project, args: list[str]) -> None:
     """Generate documentation (no-op unless the language has a handler)."""
@@ -2167,290 +1801,14 @@ def cmd_doc(script: Script, project: Project, args: list[str]) -> None:
     script.info(f"Generating docs for {project.path} (no-op)")
 
 
-# ---------------------------------------------------------------------------
-# Project-specific commands
-# ---------------------------------------------------------------------------
-
-
-@command("gen", "Generate code (runs gen.py if present)")
-def cmd_gen(script: Script, project: Project, _args: list[str]) -> None:
-    """Generate code by running gen.py at project root if present."""
-    gen_script = project.abs_path / "gen.py"
-    if not gen_script.exists():
-        script.info(f"No gen.py in {project.path}")
-        return
-    script.info(f"Generating code for {project.path}")
-    if project.language == Lang.Python:
-        project.emit_python(
-            script,
-            ["-B", script.workspace_path(gen_script)],
-        )
-        return
-    path = script.workspace_path(project.abs_path)
-    is_new = script.enter_project(path)
-    if project.language == Lang.Rust and is_new:
-        project.emit_rs_env(script)
-    script.run(["python3", "-B", script.workspace_path(gen_script)])
-
-
-@command("dist", "Build distribution (runs dist.py if present)")
-def cmd_dist(script: Script, project: Project, args: list[str]) -> None:
-    """Build distribution by running dist.py at project root if present."""
-    del args  # unused
-    dist_script = project.abs_path / "dist.py"
-    if not dist_script.exists():
-        script.info(f"No dist.py in {project.path}")
-        return
-    script.info(f"Building distribution for {project.path}")
-    path = script.workspace_path(project.abs_path)
-    is_new = script.enter_project(path)
-    if project.language == Lang.Rust and is_new:
-        project.emit_rs_env(script)
-    script.run(["python3", "-B", script.workspace_path(dist_script)])
-
-
 @command(
     "integration",
     "Run integration tests (if build.json target exists)",
 )
 def cmd_integration(script: Script, project: Project, args: list[str]) -> None:
-    """Run integration tests if a build.json integration target exists.
-
-    This is a fallback handler for projects without an integration target.
-    Projects with integration tests should define the target in build.json.
-    """
+    """Run integration tests if a build.json integration target exists."""
     del args  # unused
-    # If we reach here, there's no custom integration target in build.json
     script.info(f"No integration target in {project.path}")
-
-
-@command("dev", "Run development server", project_only=True, lang=Lang.Python)
-def cmd_dev_py(script: Script, project: Project, args: list[str]) -> None:
-    """Run development server (web project only)."""
-    if project.name != "web":
-        script.raw("echo 'dev command is only available for /lib/web' >&2; exit 1")
-        return
-    script.info(f"Starting dev server for {project.path}")
-    port = "8939"
-    extra_args = list(args)
-    if "--port" not in args and "-p" not in args:
-        extra_args = ["--port", port] + extra_args
-    project.emit_python(
-        script,
-        ["-m", "uvicorn", "glo_web.app:app", "--host", "127.0.0.1", "--reload"],
-        extra_args=extra_args,
-    )
-
-
-@command("dev", "Run development server", project_only=True, lang=Lang.Purescript)
-def cmd_dev_ps(script: Script, project: Project, args: list[str]) -> None:
-    """Run development server for PureScript SPA."""
-    del args  # unused
-    script.info(f"Starting dev server for {project.path}")
-    script.pushd(script.workspace_path(project.abs_path))
-    script.run(["spago", "build", "--watch"])
-    script.popd()
-
-
-@command("serve", "Run production server", project_only=True, lang=Lang.Python)
-def cmd_serve_py(script: Script, project: Project, args: list[str]) -> None:
-    """Run production server."""
-    if project.name != "web":
-        script.raw(
-            f"echo 'serve command is not available for {project.path}' >&2; exit 1"
-        )
-        return
-    script.info(f"Starting server for {project.path}")
-    port = "8939"
-    extra_args = list(args)
-    if "--port" not in args and "-p" not in args:
-        extra_args = ["--port", port] + extra_args
-    project.emit_python(
-        script,
-        ["-m", "uvicorn", "glo_web.app:app", "--host", "127.0.0.1"],
-        extra_args=extra_args,
-    )
-
-
-@command("serve", "Run production server", project_only=True, lang=Lang.Purescript)
-def cmd_serve_ps(script: Script, project: Project, args: list[str]) -> None:
-    """Serve PureScript SPA (requires bundling first)."""
-    del args  # unused
-    script.info(f"Serving {project.path}")
-    script.pushd(script.workspace_path(project.abs_path))
-    script.run(["python3", "-m", "http.server", "--bind", "127.0.0.1", "8080"])
-    script.popd()
-
-
-@command(
-    "revision", "Create Alembic migration revision", project_only=True, lang=Lang.Python
-)
-def cmd_revision(script: Script, project: Project, args: list[str]) -> None:
-    """Create Alembic revision (core project only)."""
-    if project.name != "core":
-        script.raw(
-            "echo 'revision command is only available for /lib/core' >&2; exit 1"
-        )
-        return
-    message = args[0] if args else "describe change"
-    script.info(f"Creating revision: {message}")
-    script.pushd(script.workspace_path(project.abs_path))
-    project.emit_env(script)
-    script.run(
-        [
-            "${VIRTUAL_ENV}/bin/alembic",
-            "-c",
-            "alembic.ini",
-            "revision",
-            "--autogenerate",
-            "-m",
-            message,
-        ]
-    )
-    script.popd()
-
-
-@command(
-    "migrate",
-    "Run Alembic migrations",
-    project_only=True,
-    lang=Lang.Python,
-)
-def cmd_migrate(script: Script, project: Project, args: list[str]) -> None:
-    """Run Alembic migrations (core project only)."""
-    del args  # unused
-    if project.name != "core":
-        script.raw("echo 'migrate command is only available for /lib/core' >&2; exit 1")
-        return
-    script.info("Running migrations")
-    script.pushd(script.workspace_path(project.abs_path))
-    project.emit_env(script)
-    script.run(
-        [
-            "${VIRTUAL_ENV}/bin/alembic",
-            "-c",
-            "alembic.ini",
-            "upgrade",
-            "head",
-        ]
-    )
-    script.popd()
-
-
-@command("fetch", "Download and cache a model", project_only=True, lang=Lang.Python)
-def cmd_fetch(script: Script, project: Project, args: list[str]) -> None:
-    """Fetch a model (model project only)."""
-    if project.name != "model":
-        script.raw("echo 'fetch command is only available for /lib/model' >&2; exit 1")
-        return
-    if not args:
-        script.raw(
-            f"echo 'Usage: {cli_invocation()} /lib/model fetch MODEL_NAME' >&2; exit 1"
-        )
-        return
-    model_name = args[0]
-    script.info(f"Fetching model: {model_name}")
-    project.emit_python(script, ["-m", "glo_model.fetch", model_name])
-
-
-@command("bench", "Run benchmark on a model", project_only=True, lang=Lang.Python)
-def cmd_bench(script: Script, project: Project, args: list[str]) -> None:
-    """Run benchmark (model project only)."""
-    if project.name != "model":
-        script.raw("echo 'bench command is only available for /lib/model' >&2; exit 1")
-        return
-    if not args:
-        script.raw(
-            f"echo 'Usage: {cli_invocation()} /lib/model bench MODEL_NAME [--rounds N] [--json]' >&2; exit 1"
-        )
-        return
-    model_name = args[0]
-    extra = args[1:] if len(args) > 1 else []
-    script.info(f"Benchmarking model: {model_name}")
-    project.emit_python(
-        script,
-        ["-m", "glo_model.cli", "bench", "--model_name", model_name],
-        extra_args=extra,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Pulumi commands (ops project)
-# ---------------------------------------------------------------------------
-
-
-def emit_pulumi_command(
-    script: Script,
-    project: Project,
-    action: str,
-    stack: str,
-    extra_args: list[str] | None = None,
-) -> None:
-    """Emit a Pulumi command to the script."""
-    if project.name != "ops":
-        script.raw(
-            f"echo '{action} command is only available for /lib/ops' >&2; exit 1"
-        )
-        return
-
-    script.pushd(script.workspace_path(project.abs_path))
-    project.emit_env(script)
-    script.export("PULUMI_PYTHON_CMD", "${VIRTUAL_ENV}/bin/python3")
-
-    cmd = ["pulumi", action, "--stack", stack]
-    if extra_args:
-        cmd.extend(extra_args)
-
-    script.info(f"Running: {shcmd(cmd)}")
-    script.raw(f"source pulumi_login.sh && {shcmd(cmd)}")
-    script.popd()
-
-
-@command("preview", "Pulumi preview", project_only=True, lang=Lang.Python)
-def cmd_preview(script: Script, project: Project, args: list[str]) -> None:
-    """Run Pulumi preview."""
-    stack = args[0] if args else "prod"
-    emit_pulumi_command(script, project, "preview", stack)
-
-
-@command("up", "Pulumi up (deploy)", project_only=True, lang=Lang.Python)
-def cmd_up(script: Script, project: Project, args: list[str]) -> None:
-    """Run Pulumi up."""
-    stack = args[0] if args else "prod"
-    emit_pulumi_command(script, project, "up", stack, ["--yes"])
-
-
-@command("destroy", "Pulumi destroy", project_only=True, lang=Lang.Python)
-def cmd_destroy(script: Script, project: Project, args: list[str]) -> None:
-    """Run Pulumi destroy."""
-    stack = args[0] if args else "prod"
-    emit_pulumi_command(script, project, "destroy", stack)
-
-
-@command("refresh", "Pulumi refresh", project_only=True, lang=Lang.Python)
-def cmd_refresh(script: Script, project: Project, args: list[str]) -> None:
-    """Run Pulumi refresh."""
-    stack = args[0] if args else "prod"
-    emit_pulumi_command(script, project, "refresh", stack)
-
-
-# ---------------------------------------------------------------------------
-# Root-level only commands
-# ---------------------------------------------------------------------------
-
-
-@command("cuda-deps", "Build llama-cpp-python wheel with CUDA support", root_only=True)
-def cmd_cuda_deps(script: Script, project: Project, args: list[str]) -> None:
-    """Build llama-cpp-python wheel with CUDA support.
-
-    Runs script/deps/build_lcp_wheel.sh to build the wheel into wheels/.
-    """
-    del project  # unused
-    script.info("Building llama-cpp-python wheel")
-    cmd = ["script/deps/build_lcp_wheel.sh"]
-    if args:
-        cmd.extend(args)
-    script.run(cmd)
 
 
 # ---------------------------------------------------------------------------
@@ -2461,12 +1819,7 @@ def cmd_cuda_deps(script: Script, project: Project, args: list[str]) -> None:
 def expand_to_atomic_commands(
     cmd: Command, excluded_targets: set[str] | None = None
 ) -> list[str]:
-    """Expand a command (possibly meta) to list of atomic command names.
-
-    Args:
-        cmd: The command to expand
-        excluded_targets: Set of target names to exclude from expansion
-    """
+    """Expand a command (possibly meta) to a list of atomic command names."""
     if excluded_targets is None:
         excluded_targets = set()
 
@@ -2484,18 +1837,11 @@ def expand_to_atomic_commands(
 def build_task_graph(
     items: list[ProjectItem | CommandItem],
     all_projects: list[str],
-    project_deps: dict[str, list[str]],  # project -> list of parent projects
+    project_deps: dict[str, list[str]],
 ) -> dict[str, Task]:
-    """Build task graph from parsed items.
-
-    Returns dict mapping task ID to Task objects with dependencies set.
-    """
+    """Build the task graph for parallel execution."""
     tasks: dict[str, Task] = {}
-
-    # First pass: collect all (project, command) pairs with meta info
-    # Track which projects have which commands
     project_commands: dict[str, list[tuple[str, list[str], str | None]]] = {}
-
     target_projects: list[str] = []
 
     for item in items:
@@ -2526,6 +1872,12 @@ def build_task_graph(
                     if proj_path not in project_commands:
                         project_commands[proj_path] = []
                     for atomic_cmd in atomic_commands:
+                        atomic_definition = COMMANDS[atomic_cmd]
+                        if (
+                            atomic_definition.custom_only
+                            and Project(proj_path).get_custom_target(atomic_cmd) is None
+                        ):
+                            continue
                         project_commands[proj_path].append(
                             (atomic_cmd, item.args, meta_name)
                         )
@@ -3152,11 +2504,14 @@ def show_help(all_projects: list[str]) -> None:
 
     # Group commands
     common = []
+    explicit_project = []
     project_specific = []
     root_specific = []
 
     for name, cmd in sorted(COMMANDS.items()):
-        if cmd.root_only:
+        if cmd.custom_only:
+            explicit_project.append((name, cmd.help))
+        elif cmd.root_only:
             root_specific.append((name, cmd.help))
         elif cmd.project_only:
             project_specific.append((name, cmd.help))
@@ -3167,13 +2522,18 @@ def show_help(all_projects: list[str]) -> None:
     for name, help_text in common:
         print(f"  {name:20} {help_text}")
 
+    print("\nExplicit project targets:")
+    for name, help_text in explicit_project:
+        print(f"  {name:20} {help_text}")
+
     print("\nProject-specific commands:")
     for name, help_text in project_specific:
         print(f"  {name:20} {help_text}")
 
-    print("\nRoot-level commands:")
-    for name, help_text in root_specific:
-        print(f"  {name:20} {help_text}")
+    if root_specific:
+        print("\nRoot-level commands:")
+        for name, help_text in root_specific:
+            print(f"  {name:20} {help_text}")
 
     print("\nUsage:")
     print(f"  {cli}                                   # Show this help")
@@ -3690,14 +3050,21 @@ def emit_command(
         # Meta-command: emit subtargets in sequence (excluding excluded ones)
         subtargets_to_run = [s for s in cmd.subtargets if s not in excluded_targets]
         for i, subtarget_name in enumerate(subtargets_to_run):
-            subtarget = COMMANDS[subtarget_name]
             # Pass args only to the last subtarget
             subtarget_args = args if i == len(subtargets_to_run) - 1 else []
-            emit_command(script, subtarget, project, subtarget_args, excluded_targets)
+            emit_target(
+                script,
+                subtarget_name,
+                project,
+                subtarget_args,
+                excluded_targets,
+            )
     else:
         # Regular command: emit via language-specific handler
         handler = cmd.get_handler(project.language)
         if handler is None:
+            if cmd.custom_only:
+                return
             if project.language in (Lang.Meta, Lang.Rust, Lang.TypeScript, Lang.Rocq):
                 script.info(
                     f"Skipping {cmd.name} for {project.path} ({project.language.name})"
@@ -3804,8 +3171,8 @@ def run_sequential(
                 run_on = target_projects if target_projects else all_projects
                 for proj_path in run_on:
                     project = Project(proj_path)
-                    # Skip if this is a custom target that doesn't exist for this project
-                    if cmd is None and project.get_custom_target(item.name) is None:
+                    custom_target = project.get_custom_target(item.name)
+                    if (cmd is None or cmd.custom_only) and custom_target is None:
                         continue
                     script.leave_project()
                     script.blank()
@@ -4005,7 +3372,6 @@ Examples:
   {cli} format                        Format all projects
   {cli} /py ^/py/core precommit       Run precommit on all Python except core
   {cli} precommit ^test               Run precommit without running tests
-  {cli} /py/web dev --port 9000       Run web dev server on port 9000
   {cli} /py unit -k test_foo          Run specific tests on all Python projects
   {cli} /lib/tuner train -- --help    Pass --help to the train target
   {cli} shellcheck /py/core lint      Run shellcheck, then lint core

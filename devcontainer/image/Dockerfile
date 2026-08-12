@@ -77,9 +77,9 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip \
 
 # Install just from GitHub releases.
 ARG JUST_ENABLED=1
-ARG JUST_VERSION=1.43.0
-ARG JUST_SHA256_X86_64=a1bc93654f31669fd964ea3011a5e5e9676b9b6f8adcd762606e5140632ea72d
-ARG JUST_SHA256_AARCH64=4fcd8310081c32742eb984b1fdd0eee2e5d4d0f1be9629318012d42606ec9b3e
+ARG JUST_VERSION=1.58.0
+ARG JUST_SHA256_X86_64=4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d
+ARG JUST_SHA256_AARCH64=748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df
 RUN if [ "${JUST_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -99,9 +99,9 @@ RUN if [ "${JUST_ENABLED}" = "1" ]; then \
 
 # Install bat (cat clone with syntax highlighting) from GitHub releases.
 ARG BAT_ENABLED=1
-ARG BAT_VERSION=0.26.0
-ARG BAT_SHA256_X64=26a683b038fbc526c6df4166db693ddc9e431e5bdc285d45ccd6b72f3cff5ffd
-ARG BAT_SHA256_ARM64=6ee11bd8a520c514e230669156d9298f0dd2b5afc788c0952a4b14fcec51eaee
+ARG BAT_VERSION=0.26.1
+ARG BAT_SHA256_X64=0dcd8ac79732c0d5b136f11f4ee00e581440e16a44eab5b3105b611bbf2cf191
+ARG BAT_SHA256_ARM64=6369242c584065f195fb20cb36fbd7cb63ae690605bbe89868a7596b596c2c23
 RUN if [ "${BAT_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -121,9 +121,9 @@ RUN if [ "${BAT_ENABLED}" = "1" ]; then \
 
 # Install fd (fast find alternative) from GitHub releases.
 ARG FD_ENABLED=1
-ARG FD_VERSION=10.3.0
-ARG FD_SHA256_X64=2b6bfaae8c48f12050813c2ffe1884c61ea26e750d803df9c9114550a314cd14
-ARG FD_SHA256_ARM64=996b9b1366433b211cb3bbedba91c9dbce2431842144d925428ead0adf32020b
+ARG FD_VERSION=10.4.2
+ARG FD_SHA256_X64=e3257d48e29a6be965187dbd24ce9af564e0fe67b3e73c9bdcd180f4ec11bdde
+ARG FD_SHA256_ARM64=f32d3657473fba74e2600babc8db0b93420d51169223b7e8143b2ed55d8fd9e8
 RUN if [ "${FD_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -143,9 +143,9 @@ RUN if [ "${FD_ENABLED}" = "1" ]; then \
 
 # Install zk (Zettelkasten note-taking assistant) from GitHub releases.
 ARG ZK_ENABLED=1
-ARG ZK_VERSION=0.15.1
-ARG ZK_SHA256_X64=6d652bba16faccd169469ceddf3b1e1dd8f3b2af72de218b0f9921809139c0b4
-ARG ZK_SHA256_ARM64=19460e19e3389220015aa98ca849449d9c739ffd6f45c1935b0cd2d149424ce5
+ARG ZK_VERSION=0.15.6
+ARG ZK_SHA256_X64=50b2f0a8c533d607e5a8a1f478fe78d5585317178bd86456659c049965a8945d
+ARG ZK_SHA256_ARM64=80550e5ab50b826fef660e72fc6c7c8c872ad8673ffb798dabc32c714f63fdd5
 RUN if [ "${ZK_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -162,8 +162,35 @@ RUN if [ "${ZK_ENABLED}" = "1" ]; then \
     zk --version; \
     fi
 
+# Install SecretSpec from checksummed upstream release archives.
+ARG SECRETSPEC_ENABLED=0
+ARG SECRETSPEC_VERSION=0.19.1
+ARG SECRETSPEC_SHA256_X64=9a0b5882532f5ffbb1c687d9284fa8041949962b05f14fc131050f86c70e1efc
+ARG SECRETSPEC_SHA256_ARM64=9b0804932f011ee13709d06a342cd7d30222a764bb62d343771964471b2a7e25
+RUN if [ "${SECRETSPEC_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) target="x86_64-unknown-linux-gnu"; checksum="${SECRETSPEC_SHA256_X64}" ;; \
+        aarch64) target="aarch64-unknown-linux-gnu"; checksum="${SECRETSPEC_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    asset="secretspec-${target}.tar.xz"; \
+    url="https://github.com/cachix/secretspec/releases/download/v${SECRETSPEC_VERSION}/${asset}"; \
+    curl -fsSLo "/tmp/${asset}" "${url}"; \
+    echo "${checksum}  /tmp/${asset}" | sha256sum -c -; \
+    mkdir -p /tmp/secretspec-dist; \
+    tar -xJf "/tmp/${asset}" -C /tmp/secretspec-dist --strip-components=1; \
+    install -m 0755 /tmp/secretspec-dist/secretspec /usr/local/bin/secretspec; \
+    install -d /usr/local/share/licenses/secretspec; \
+    install -m 0644 /tmp/secretspec-dist/LICENSE \
+        /usr/local/share/licenses/secretspec/LICENSE; \
+    rm -f "/tmp/${asset}"; \
+    rm -rf /tmp/secretspec-dist; \
+    fi
+
 # Install Node.js via nvm using the latest LTS line.
-ARG NVM_VERSION=0.40.3
+ARG NVM_VERSION=0.40.6
 ENV NVM_DIR=/usr/local/nvm
 RUN set -eux; \
     mkdir -p "${NVM_DIR}"; \
@@ -186,8 +213,8 @@ ARG RUST_ENABLED=0
 ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
-ARG RUST_VERSION=1.95.0
-ARG CARGO_BINSTALL_VERSION=1.19.1
+ARG RUST_VERSION=1.97.1
+ARG CARGO_BINSTALL_VERSION=1.21.1
 ARG CARGO_RUN_BIN_VERSION=1.7.5
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -229,12 +256,12 @@ RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
 # To update ghcup: change GHCUP_VERSION, then get SHA256s from:
 #   https://downloads.haskell.org/~ghcup/<version>/SHA256SUMS
 ARG HASKELL_ENABLED=0
-ARG GHCUP_VERSION=0.2.2.0
-ARG GHCUP_SHA256_X64=29c7ed853a0525e6d787697ebb12b0a76f2ab0c5aca3e0b23e5ba75279ddd19d
-ARG GHCUP_SHA256_ARM64=67d50a72e33454d566c9e40db2d64b289ce3deaaee781633dc4a25e4a696a319
-ARG GHC_VERSION=9.12.4
+ARG GHCUP_VERSION=0.2.6.2
+ARG GHCUP_SHA256_X64=9ed5da5449b48043a0d17e767c05d2ef585e25a639bb934329496c6d2fad9cf8
+ARG GHCUP_SHA256_ARM64=65a5f05120288ee4f1a81d28825374b6af317456a351a586adfce90c6dc29e3b
+ARG GHC_VERSION=9.14.1
 ARG CABAL_VERSION=3.16.1.0
-ARG STACK_VERSION=3.9.3
+ARG STACK_VERSION=3.11.1
 ARG HLS_VERSION=2.14.0.0
 ENV GHCUP_INSTALL_BASE_PREFIX=/usr/local
 RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
@@ -284,16 +311,16 @@ RUN if [ "${WASM_GHC_ENABLED}" = "1" ]; then \
 
 # Install Rocq prover and command-line tools via opam.
 ARG ROCQ_ENABLED=0
-ARG ROCQ_OCAML_VERSION=5.3.0
-ARG OPAM_VERSION=2.5.1
+ARG ROCQ_OCAML_VERSION=5.5.0
+ARG OPAM_VERSION=2.5.2
 ENV OPAMROOT=/opt/opam
 RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     set -eux; \
     microdnf -y --setopt=install_weak_deps=0 install m4 perl bubblewrap clang; \
     arch="$(uname -m)"; \
     case "${arch}" in \
-        x86_64) opam_arch="x86_64"; checksum="33705e328d9f740026ce182079e2457639791bcf04a0e4bafbdb2024dd4d6092" ;; \
-        aarch64) opam_arch="arm64"; checksum="fab63e2a594afeb0acc2cbc3f796d365a0ee1d55447d1dd4104f2ea2dbd9a0d3" ;; \
+        x86_64) opam_arch="x86_64"; checksum="edfca2630c373b44b7ee1c2f81cd8dcf67468d0db57d6c02158de553ac63dbd4" ;; \
+        aarch64) opam_arch="arm64"; checksum="c4106ece84bcb60c68342573d2d6b4f0d6770ee088015c2216adc83d8854dcf9" ;; \
         *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
     curl -fsSLo /tmp/opam "https://github.com/ocaml/opam/releases/download/${OPAM_VERSION}/opam-${OPAM_VERSION}-${opam_arch}-linux"; \
@@ -309,9 +336,9 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     opam repo add rocq-released https://rocq-prover.org/opam/released --yes; \
     opam update --yes; \
     fi
-ARG ROCQ_VERSION=9.0.0
+ARG ROCQ_VERSION=9.2.0
 ARG VSROCQ_LANGUAGE_SERVER_PACKAGE=vsrocq-language-server
-ARG ROCQ_EXTRA_PACKAGES="rocq-equations.1.3.1+9.0 coq-quickchick.2.1.1 coq-ext-lib.0.13.0 coq-hammer.1.3.2+9.0 coq-hammer-tactics.1.3.2+9.0"
+ARG ROCQ_EXTRA_PACKAGES="rocq-equations.1.3.2+9.2 coq-quickchick.2.2.0 coq-ext-lib.0.13.1 coq-hammer.1.3.3+9.2 coq-hammer-tactics.1.3.3+9.2"
 RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
     set -eux; \
     opam install --switch=rocq --yes "rocq-prover.${ROCQ_VERSION}" "${VSROCQ_LANGUAGE_SERVER_PACKAGE}" ${ROCQ_EXTRA_PACKAGES}; \
@@ -326,9 +353,9 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
 
 # Install SMT solver tooling from GitHub releases.
 ARG SMT_ENABLED=0
-ARG Z3_VERSION=4.16.0
-ARG Z3_SHA256_X64=7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
-ARG Z3_SHA256_ARM64=87fcd963d3eecb0f12cf1c3ef0ad74e84a3a7bd3caed5d94445645ef94ae6274
+ARG Z3_VERSION=5.0.0
+ARG Z3_SHA256_X64=d4922cebc9f0a55629231ec0c62f0bbedf8006eddaed4e68199ad19626b697f6
+ARG Z3_SHA256_ARM64=c9437ff7e419e715db76d20e4b2142bf60a206c8e1d2b380c0ce35dc8d07b1f4
 RUN if [ "${SMT_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -363,13 +390,13 @@ VOLUME ["/home/user/.config", "/home/user/.local/share"]
 
 # Install Claude CLI from official releases
 # To update Claude Code: change CLAUDE_VERSION, then run:
-#   gcs_bucket="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
-#   curl -fsSL "$gcs_bucket/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
-#   curl -fsSL "$gcs_bucket/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
+#   release_base="https://downloads.claude.ai/claude-code-releases"
+#   curl -fsSL "$release_base/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
+#   curl -fsSL "$release_base/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
 ARG CLAUDE_ENABLED=0
-ARG CLAUDE_VERSION=2.1.170
-ARG CLAUDE_SHA256_X64=849e007277a0442ab27570d3e3d6d43787507946590e8dd1947e5a39b7081f9e
-ARG CLAUDE_SHA256_ARM64=1bb9d032440a75532f7dd4cafbc687f220aaf16c63eba17e192dfbec2f04bd25
+ARG CLAUDE_VERSION=2.1.227
+ARG CLAUDE_SHA256_X64=6832dc3f1797b890b71116e5f2dbbf9a83fd3d0498c235b4b0f9cd0e6e499ad6
+ARG CLAUDE_SHA256_ARM64=db47335532cbcab67a4b3ab16d8f3f77976bf85d53c7d79f8296538aa22bfce6
 RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -378,9 +405,9 @@ RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
         aarch64) claude_arch="arm64"; checksum="${CLAUDE_SHA256_ARM64}" ;; \
         *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
-    gcs_bucket="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"; \
+    release_base="https://downloads.claude.ai/claude-code-releases"; \
     platform="linux-${claude_arch}"; \
-    url="$gcs_bucket/${CLAUDE_VERSION}/$platform/claude"; \
+    url="$release_base/${CLAUDE_VERSION}/$platform/claude"; \
     binary_path="/tmp/claude"; \
     curl -fsSL -o "$binary_path" "$url"; \
     echo "$checksum  $binary_path" | sha256sum -c -; \
@@ -395,7 +422,7 @@ RUN if [ "${GEMINI_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @google/gemini-cli@0.52.0; \
+      @google/gemini-cli@0.54.4; \
     fi
 
 # Install codex
@@ -404,7 +431,7 @@ RUN if [ "${CODEX_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      @openai/codex@0.145.0; \
+      @openai/codex@0.147.0; \
     fi
 
 # Install opencode
@@ -413,7 +440,7 @@ RUN if [ "${OPENCODE_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
     nvm use --silent --lts; \
     npm install -g \
-      opencode-ai@1.18.5; \
+      opencode-ai@1.18.16; \
     fi
 
 # Install glo
@@ -426,8 +453,7 @@ COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
-COPY --chmod=0755 files/glo/bin/glo-opencode /opt/glo/bin/glo-opencode
-COPY --chmod=0755 files/glo/bin/glo-cargo-run-bin /opt/glo/bin/glo-cargo-run-bin
+COPY --chmod=0755 files/glo/bin/glo-secrets /opt/glo/bin/glo-secrets
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/
 COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/

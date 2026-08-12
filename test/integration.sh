@@ -20,6 +20,11 @@ git config user.email "test@glo"
 git config user.name "glo test"
 export PATH="$WORKSPACE/bin:$PATH"
 
+# --- Optional tooling ---
+step "SecretSpec tooling"
+"${GLO_DIR}/test/secretspec-tooling.sh"
+ok "SecretSpec tooling"
+
 # --- Bootstrap ---
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"
@@ -86,8 +91,14 @@ ok "start / add-note / close"
 step "glo-issue: icebox / resume"
 bin/glo-issue icebox "$T5"
 bin/glo-issue ls --status=icebox | grep -q "$T5"
-! bin/glo-issue ready | grep -q "$T5"
-! bin/glo-issue blocked | grep -q "$T5"
+if bin/glo-issue ready | grep -q "$T5"; then
+    echo "Iceboxed issue unexpectedly appeared in ready output" >&2
+    exit 1
+fi
+if bin/glo-issue blocked | grep -q "$T5"; then
+    echo "Iceboxed issue unexpectedly appeared in blocked output" >&2
+    exit 1
+fi
 bin/glo-issue start "$T5"
 bin/glo-issue ls --status=in_progress | grep -q "$T5"
 bin/glo-issue status "$T5" icebox
