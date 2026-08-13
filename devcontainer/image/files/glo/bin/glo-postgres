@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+postgres_bin=/usr/pgsql-18/bin
+postgres_user=glo
+postgres_password=glo
+postgres_database=glo_test
+postgres_port="${GLO_POSTGRES_PORT:-55432}"
+postgres_root="${GLO_POSTGRES_ROOT:-${XDG_STATE_HOME:-${HOME}/.local/state}/glo/postgres-18}"
+postgres_data="${postgres_root}/data"
+postgres_socket="${postgres_root}/socket"
+postgres_log="${postgres_root}/postgres.log"
+
+usage() {
+    cat <<'EOF'
+Usage: glo-postgres {start|stop|status|url|env}
+
+Manage the disposable loopback-only PostgreSQL 18 cluster included when the
+devcontainer is built with POSTGRES_ENABLED=1.
+
+Environment:
+  GLO_POSTGRES_PORT  Loopback TCP port (default: 55432)
+  GLO_POSTGRES_ROOT  Cluster state directory
+EOF
+}
+
+fail() {
+    printf '[E] %s\n' "$*" >&2
+    exit 1
+}
+
+require_feature() {
+    if [[ ! -x "${postgres_bin}/postgres" ]]; then
+        fail "PostgreSQL 18 is unavailable; rebuild with POSTGRES_ENABLED=1"
+    fi
+}
+
+validate_config() {
+    [[ "$postgres_port" =~ ^[0-9]+$ ]] || fail "GLO_POSTGRES_PORT must be numeric"
+    ((postgres_port >= 1024 && postgres_port <= 65535)) \
+        || fail "GLO_POSTGRES_PORT must be between 1024 and 65535"
+    [[ -n "$postgres_root" && "$postgres_root" != "/" ]] \
+        || fail "GLO_POSTGRES_ROOT must select a non-root directory"
+}
+
+database_url() {
+    printf 'postgresql://%s:%s@127.0.0.1:%s/%s?sslmode=disable\n' \
+        "$postgres_user" "$postgres_password" "$postgres_port" "$postgres_database"
+}
+
+is_running() {
+    [[ -f "${postgres_data}/PG_VERSION" ]] \
+        && "${postgres_bin}/pg_ctl" --pgdata="$postgres_data" status >/dev/null 2>&1
+}
+
+initialize_cluster() {
+    if [[ -f "${postgres_data}/PG_VERSION" ]]; then
+        return
+    fi
+    mkdir -p "$postgres_root" "$postgres_socket"
+    chmod 700 "$postgres_root" "$postgres_socket"
+    password_file="$(mktemp "${postgres_root}/password.XXXXXX")"
+    trap 'rm -f "$password_file"' RETURN
+    chmod 600 "$password_file"
+    printf '%s\n' "$postgres_password" > "$password_file"
+    "${postgres_bin}/initdb" \
+        --pgdata="$postgres_data" \
+        --username="$postgres_user" \
+        --pwfile="$password_file" \
+        --auth-local=trust \
+        --auth-host=scram-sha-256 \
+        --encoding=UTF8 \
+        --locale=C.UTF-8 >/dev/null
+    rm -f "$password_file"
+    trap - RETURN
+}
+
+start_cluster() {
+    initialize_cluster
+    mkdir -p "$postgres_socket"
+    chmod 700 "$postgres_socket"
+    if ! is_running; then
+        "${postgres_bin}/pg_ctl" \
+            --pgdata="$postgres_data" \
+            --log="$postgres_log" \
+            --options="-h 127.0.0.1 -p ${postgres_port} -k ${postgres_socket}" \
+            --wait start >/dev/null
+    fi
+    if ! PGPASSWORD="$postgres_password" "${postgres_bin}/psql" \
+        --host=127.0.0.1 \
+        --port="$postgres_port" \
+        --username="$postgres_user" \
+        --dbname=postgres \
+        --tuples-only \
+        --no-align \
+        --command="SELECT 1 FROM pg_database WHERE datname = '${postgres_database}'" \
+        | grep -qx 1; then
+        PGPASSWORD="$postgres_password" "${postgres_bin}/createdb" \
+            --host=127.0.0.1 \
+            --port="$postgres_port" \
+            --username="$postgres_user" \
+            "$postgres_database"
+    fi
+    printf 'PostgreSQL 18 ready at %s\n' "$(database_url)"
+}
+
+stop_cluster() {
+    if is_running; then
+        "${postgres_bin}/pg_ctl" \
+            --pgdata="$postgres_data" \
+            --wait \
+            --mode=fast stop >/dev/null
+        printf 'PostgreSQL 18 stopped\n'
+    else
+        printf 'PostgreSQL 18 is not running\n'
+    fi
+}
+
+case "${1:-}" in
+    help|--help|-h) usage; exit 0 ;;
+esac
+
+require_feature
+validate_config
+
+case "${1:-}" in
+    start) start_cluster ;;
+    stop) stop_cluster ;;
+    status)
+        if ! is_running; then
+            fail "PostgreSQL 18 is not running"
+        fi
+        printf 'PostgreSQL 18 is running at %s\n' "$(database_url)"
+        ;;
+    url) database_url ;;
+    env)
+        printf 'export GLO_POSTGRES_URL=%q\n' "$(database_url)"
+        ;;
+    *) usage >&2; exit 2 ;;
+esac

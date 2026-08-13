@@ -1,4 +1,4 @@
-FROM rockylinux/rockylinux:10-minimal
+FROM rockylinux/rockylinux:10-minimal AS base
 
 USER root
 WORKDIR /root
@@ -64,12 +64,46 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         yq \
         zip \
         zstd \
-        libpq-devel \
-        postgresql \
-        postgresql-server \
         gmp-devel \
         libffi-devel \
         zlib-devel
+
+# Install an explicit PostgreSQL 18 client, server, and development boundary.
+# The default image contains no PostgreSQL packages or initialized cluster.
+FROM base AS postgres-feature
+ARG POSTGRES_ENABLED=0
+ARG PGDG_REPO_RPM_VERSION=42.0-66
+ARG PGDG_REPO_SHA256_X64=47cc6e0243230a0ebe79552ed932688ce58552bbc570e19b0888b3e8c88a66c7
+ARG PGDG_REPO_SHA256_ARM64=a5c3355fb7667ccbba2d0f31ada02a658101ebdfe4aa384317070d9ae1890c31
+RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
+    --mount=type=cache,target=/var/lib/dnf,id=dnf-lib-dev,sharing=locked \
+    if [ "${POSTGRES_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) repo_arch="x86_64"; checksum="${PGDG_REPO_SHA256_X64}" ;; \
+        aarch64) repo_arch="aarch64"; checksum="${PGDG_REPO_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    repo_rpm="pgdg-redhat-repo-${PGDG_REPO_RPM_VERSION}.rhel10PGDG.noarch.rpm"; \
+    curl -fsSLo "/tmp/${repo_rpm}" \
+        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-10-${repo_arch}/${repo_rpm}"; \
+    echo "${checksum}  /tmp/${repo_rpm}" | sha256sum -c -; \
+    rpm --install "/tmp/${repo_rpm}"; \
+    microdnf -y --setopt=install_weak_deps=0 install \
+        libpq5-devel \
+        postgresql18 \
+        postgresql18-server; \
+    rm -f "/tmp/${repo_rpm}"; \
+    /usr/pgsql-18/bin/psql --version | grep -E '^psql \(PostgreSQL\) 18\.'; \
+    fi
+
+RUN groupadd --gid 1000 user \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user
+COPY --chmod=0755 files/glo/bin/glo-postgres /usr/local/bin/glo-postgres
+ENV PATH="/usr/pgsql-18/bin:${PATH}"
+
+FROM postgres-feature AS development
 
 # Upgrade pip and install uv
 RUN python3 -m pip install --no-cache-dir --upgrade pip \
@@ -375,9 +409,7 @@ RUN if [ "${SMT_ENABLED}" = "1" ]; then \
 
 # Setup home
 ARG PROJECT_NAME=workspace
-RUN groupadd --gid 1000 user \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
-    && chown -R user:user /home/user \
+RUN chown -R user:user /home/user \
     && if [ -d /usr/local/.ghcup/logs ]; then chmod -R a+rwX /usr/local/.ghcup/logs; fi \
     && install -d -o user -g user \
       /home/user/.local/bin /home/user/.local/share /home/user/.local/state \
@@ -454,6 +486,7 @@ COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
 COPY --chmod=0755 files/glo/bin/glo-secrets /opt/glo/bin/glo-secrets
+COPY --chmod=0755 files/glo/bin/glo-postgres /opt/glo/bin/glo-postgres
 COPY files/glo/lib/ /opt/glo/lib/
 COPY files/glo/templates/ /opt/glo/templates/
 COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/

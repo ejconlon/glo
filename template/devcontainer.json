@@ -4,7 +4,8 @@
     "dockerfile": "image/Dockerfile",
     "context": "image",
     "args": {
-      "PROJECT_NAME": "__PROJECT_NAME__"
+      "PROJECT_NAME": "__PROJECT_NAME__",
+      "POSTGRES_ENABLED": "0"
     }
   },
   "remoteUser": "user",

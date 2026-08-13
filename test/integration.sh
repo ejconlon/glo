@@ -25,6 +25,10 @@ step "SecretSpec tooling"
 "${GLO_DIR}/test/secretspec-tooling.sh"
 ok "SecretSpec tooling"
 
+step "PostgreSQL tooling"
+"${GLO_DIR}/test/postgres-tooling.sh"
+ok "PostgreSQL tooling"
+
 # --- Bootstrap ---
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"

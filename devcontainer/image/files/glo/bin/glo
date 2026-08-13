@@ -11,6 +11,7 @@ case "${1:-}" in
     gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
     local)     shift; exec "${_GLO_BIN_DIR}/glo-local" "$@" ;;
     notes)     shift; exec "${_GLO_BIN_DIR}/glo-notes" "$@" ;;
+    postgres)  shift; exec "${_GLO_BIN_DIR}/glo-postgres" "$@" ;;
     secrets)   shift; exec "${_GLO_BIN_DIR}/glo-secrets" "$@" ;;
     readme)    cat "$README" ;;
     help|--help|-h)
@@ -26,12 +27,13 @@ Commands:
   gen        Generate a lib component from a template (glo-gen --help)
   local      Install host dependencies (glo-local --help)
   notes      zk notebook wrapper for base/ (glo-notes --help)
+  postgres   Disposable PostgreSQL 18 test cluster (when enabled)
   secrets    Manage a local KDBX database through SecretSpec
   readme     Print full documentation
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|gen|local|notes|secrets|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|gen|local|notes|postgres|secrets|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

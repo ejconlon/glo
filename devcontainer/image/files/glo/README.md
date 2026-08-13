@@ -267,6 +267,26 @@ glo-local secretspec              # checksummed Apache-2.0 SecretSpec release
 
 `glo local ...` is equivalent to `glo-local ...`.
 
+### Optional PostgreSQL 18 test cluster
+
+The devcontainer has no PostgreSQL packages or service by default. A workspace
+that sets the `POSTGRES_ENABLED` image build argument to `1` receives the
+PostgreSQL 18 client, server, and development packages plus a disposable local
+cluster helper. Start it explicitly and map its neutral URL to the project test
+setting:
+
+```sh
+glo postgres start
+eval "$(glo postgres env)"
+export MY_PROJECT_TEST_DATABASE_URL="$GLO_POSTGRES_URL"
+```
+
+The cluster listens only on `127.0.0.1:55432`, uses the fixed local-only
+`glo:glo` credential and `glo_test` database, and stores disposable state under
+`${XDG_STATE_HOME:-$HOME/.local/state}/glo/postgres-18`. The remaining commands
+are `glo postgres status`, `url`, and `stop`. No cluster is initialized or
+started merely by enabling the image feature.
+
 ### Local KDBX credentials
 
 `glo-secrets` is a foreground wrapper around SecretSpec's built-in KDBX and
