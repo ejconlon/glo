@@ -6,6 +6,7 @@ DOCKERFILE="$GLO_DIR/devcontainer/image/Dockerfile"
 TEMPLATE="$GLO_DIR/template/devcontainer.json"
 GLO="$GLO_DIR/devcontainer/image/files/glo/bin/glo"
 GLO_POSTGRES="$GLO_DIR/devcontainer/image/files/glo/bin/glo-postgres"
+BOOTSTRAP="$GLO_DIR/bootstrap.sh"
 
 grep -Fq 'ARG POSTGRES_ENABLED=0' "$DOCKERFILE"
 grep -Fq 'postgresql18-server' "$DOCKERFILE"
@@ -17,6 +18,11 @@ grep -Fq 'postgres)  shift; exec "${_GLO_BIN_DIR}/glo-postgres"' "$GLO"
 grep -Fq '127.0.0.1' "$GLO_POSTGRES"
 grep -Fq 'PostgreSQL 18 is unavailable; rebuild with POSTGRES_ENABLED=1' \
     "$GLO_POSTGRES"
+# Bootstrap discovers every shipped command, including glo-postgres, when it
+# creates the workspace bin/ wrappers.
+# shellcheck disable=SC2016  # Assert bootstrap retains runtime expansion.
+grep -Fq 'for script in "${SCRIPT_DIR}/devcontainer/image/files/glo/bin"/*' \
+    "$BOOTSTRAP"
 shellcheck "$GLO_POSTGRES" "$GLO_DIR/test/postgres-image.sh"
 
 help_output="$($GLO_POSTGRES --help 2>&1 || true)"

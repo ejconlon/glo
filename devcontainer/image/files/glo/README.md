@@ -6,7 +6,7 @@ Use glo to manage work in this repository: issues, agent focus, builds, generate
 
 - Run commands from inside the workspace git repository.
 - The workspace root is the nearest parent directory containing `.git`.
-- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, `glo-local`, and `glo-notes` directly; `/opt/glo/bin` is on `PATH`.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
 - `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes.
 - Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
 - Use issues for durable task state. Use notes for longer-lived project knowledge.
