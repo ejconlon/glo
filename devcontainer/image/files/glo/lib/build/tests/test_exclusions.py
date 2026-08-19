@@ -1,17 +1,22 @@
 """Tests for project and target exclusion patterns."""
 
-import pytest
+import argparse
+import json
 from pathlib import Path
+
+import pytest
+
 from glo_build.cli import (
-    expand_project_pattern,
-    parse_args_sequence,
-    validate_exclusion,
-    get_all_target_names,
-    expand_to_atomic_commands,
-    set_workspace_root,
     COMMANDS,
-    ProjectItem,
     CommandItem,
+    ProjectItem,
+    expand_project_pattern,
+    expand_to_atomic_commands,
+    get_all_target_names,
+    parse_args_sequence,
+    parse_cli_arguments,
+    set_workspace_root,
+    validate_exclusion,
 )
 
 
@@ -45,6 +50,15 @@ MOCK_PROJECTS_WITH_NESTED = [
     "/lib/prover",
     "/lib/web",
 ]
+
+
+def _set_custom_targets(tmp_path: Path, project: str, *targets: str) -> None:
+    path = tmp_path / "lib" / project / "build.json"
+    document = json.loads(path.read_text())
+    document["targets"] = {
+        target: [{"command": f"echo {target}"}] for target in targets
+    }
+    path.write_text(json.dumps(document))
 
 
 @pytest.fixture(autouse=True)
@@ -279,6 +293,74 @@ class TestCombinedExclusions:
         assert len(command_items) == 1
         assert command_items[0].name == "precommit"
         assert "test" in command_items[0].excluded_targets
+
+
+class TestProjectLocalCustomTargets:
+    """Tests for custom targets scoped to explicit project selections."""
+
+    def test_custom_target_is_only_a_command_in_its_project(
+        self, tmp_path: Path
+    ) -> None:
+        """A different project's target name remains an ordinary argument."""
+        _set_custom_targets(tmp_path, "core", "run")
+        _set_custom_targets(tmp_path, "admin", "status")
+
+        result = parse_args_sequence(["/lib/core", "run", "status"], MOCK_PROJECTS)
+
+        assert result is not None
+        commands = [item for item in result if isinstance(item, CommandItem)]
+        assert commands == [CommandItem("run", ["status"], set())]
+
+        local_result = parse_args_sequence(["/lib/admin", "status"], MOCK_PROJECTS)
+        assert local_result is not None
+        local_commands = [
+            item for item in local_result if isinstance(item, CommandItem)
+        ]
+        assert local_commands == [CommandItem("status", [], set())]
+
+    def test_custom_target_requires_an_explicit_project(self, tmp_path: Path) -> None:
+        """A bare project-defined target is not workspace-global."""
+        _set_custom_targets(tmp_path, "admin", "status")
+
+        assert parse_args_sequence(["status"], MOCK_PROJECTS) is None
+
+    def test_passthrough_survives_injected_option_values_and_target_names(
+        self, tmp_path: Path
+    ) -> None:
+        """Arguments after `--` remain exact despite planner and target collisions."""
+        _set_custom_targets(tmp_path, "core", "run")
+        _set_custom_targets(tmp_path, "admin", "status")
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--plan-path")
+        parser.add_argument("args", nargs="*")
+
+        parsed, arguments = parse_cli_arguments(
+            parser,
+            [
+                "--plan-path",
+                "/tmp/plan.sh",
+                "/lib/core",
+                "run",
+                "--",
+                "status",
+                "all",
+                "--help",
+            ],
+        )
+
+        assert parsed.plan_path == "/tmp/plan.sh"
+        assert arguments == [
+            "/lib/core",
+            "run",
+            "--",
+            "status",
+            "all",
+            "--help",
+        ]
+        result = parse_args_sequence(arguments, MOCK_PROJECTS)
+        assert result is not None
+        commands = [item for item in result if isinstance(item, CommandItem)]
+        assert commands == [CommandItem("run", ["status", "all", "--help"], set())]
 
 
 class TestSubprojectExpansion:

@@ -89,6 +89,9 @@ PLAN_MODE=""
 EXEC_MODE=""
 
 for _a in "$@"; do
+    if [[ "$_a" == "--" ]]; then
+        break
+    fi
     if [[ "$_a" == "--help" || "$_a" == "-h" ]]; then
         echo "glo-build - lightweight build system. Run 'glo readme' for full documentation."
         break

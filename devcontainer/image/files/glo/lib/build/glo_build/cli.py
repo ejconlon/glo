@@ -2769,17 +2769,6 @@ def expand_project_pattern(
     return None  # Invalid pattern
 
 
-def get_all_custom_targets(all_projects: list[str]) -> set[str]:
-    """Get all custom target names defined in any project's build.json."""
-    targets: set[str] = set()
-    for proj_path in all_projects:
-        project = Project(proj_path)
-        config = project.build_config
-        if config and config.targets:
-            targets.update(config.targets.keys())
-    return targets
-
-
 def get_all_target_names(cmd_name: str) -> set[str]:
     """Get all target names that are part of a command (including subtargets).
 
@@ -2864,9 +2853,27 @@ def parse_args_sequence(
     pending_projects: list[str] = []
     passthrough_mode = False  # After --, all remaining args go to current command
 
-    # Get all valid target names (built-in commands + custom targets)
-    custom_targets = get_all_custom_targets(all_projects)
-    valid_targets = set(COMMANDS.keys()) | custom_targets
+    valid_targets = set(COMMANDS)
+    selected_projects: list[str] = []
+
+    def scoped_projects() -> list[str]:
+        """Return the pending or active explicit project selection."""
+        if pending_projects:
+            return [
+                project
+                for project in pending_projects
+                if project not in excluded_projects
+            ]
+        return selected_projects
+
+    def is_available_target(name: str) -> bool:
+        """Return whether a built-in or project-local custom target is selected."""
+        if name in valid_targets:
+            return True
+        return any(
+            Project(project).get_custom_target(name) is not None
+            for project in scoped_projects()
+        )
 
     def is_meta_command(cmd_name: str) -> bool:
         """Check if a command is a meta-command (has subtargets)."""
@@ -2896,10 +2903,15 @@ def parse_args_sequence(
 
     def flush_projects() -> None:
         """Flush pending projects after applying exclusions."""
-        nonlocal pending_projects, excluded_projects
-        for proj in pending_projects:
-            if proj not in excluded_projects:
-                items.append(ProjectItem(proj))
+        nonlocal pending_projects, excluded_projects, selected_projects
+        if not pending_projects:
+            excluded_projects = set()
+            return
+        selected_projects = [
+            project for project in pending_projects if project not in excluded_projects
+        ]
+        for project in selected_projects:
+            items.append(ProjectItem(project))
         pending_projects = []
         excluded_projects = set()
 
@@ -2951,7 +2963,7 @@ def parse_args_sequence(
                 log_error(f"No projects match pattern: {arg}")
                 return None
             pending_projects.extend(matches)
-        elif arg in valid_targets:
+        elif is_available_target(arg):
             # Command or custom target name
             if not flush_command():
                 return None
@@ -3303,6 +3315,24 @@ def run_parallel(
     return 0
 
 
+def parse_cli_arguments(
+    parser: argparse.ArgumentParser, argv: list[str]
+) -> tuple[argparse.Namespace, list[str]]:
+    """Parse build options while preserving exact target passthrough arguments."""
+    if "--" in argv:
+        separator = argv.index("--")
+        build_arguments = argv[:separator]
+        passthrough_arguments: list[str] | None = argv[separator + 1 :]
+    else:
+        build_arguments = argv
+        passthrough_arguments = None
+    parsed, extra = parser.parse_known_args(build_arguments)
+    arguments = (parsed.args or []) + extra
+    if passthrough_arguments is not None:
+        arguments.extend(("--", *passthrough_arguments))
+    return parsed, arguments
+
+
 def main(workspace_root: Path | None = None) -> int:
     """Main entry point.
 
@@ -3326,8 +3356,11 @@ def main(workspace_root: Path | None = None) -> int:
     all_projects = discover_projects(ws_root)
     argv = sys.argv[1:]
 
-    if ("--help" in argv or "-h" in argv) and any(a.startswith("/") for a in argv):
-        args_no_help = [a for a in argv if a not in ("--help", "-h")]
+    build_argv = argv[: argv.index("--")] if "--" in argv else argv
+    if ("--help" in build_argv or "-h" in build_argv) and any(
+        a.startswith("/") for a in build_argv
+    ):
+        args_no_help = [a for a in build_argv if a not in ("--help", "-h")]
         # Find first project pattern
         project_args = [a for a in args_no_help if a.startswith("/")]
         if project_args:
@@ -3415,21 +3448,7 @@ Examples:
         help="[command [args...]] [project...] [command [args...]]...",
     )
 
-    parsed, extra = parser.parse_known_args()
-
-    # Combine positional args with any extra args that weren't consumed
-    all_args = (parsed.args or []) + extra
-
-    # Restore -- separator if it was in original argv
-    # argparse consumes -- but we need it for passthrough mode
-    if "--" in argv:
-        dd_idx = argv.index("--")
-        # Count non-flag args before -- (these are the positional args before --)
-        before_dd = [a for a in argv[:dd_idx] if not a.startswith("-")]
-        # Insert -- after those positional args in all_args
-        insert_pos = len(before_dd)
-        if insert_pos <= len(all_args):
-            all_args = all_args[:insert_pos] + ["--"] + all_args[insert_pos:]
+    parsed, all_args = parse_cli_arguments(parser, argv)
 
     # Handle no-args case: show general help
     if not all_args:

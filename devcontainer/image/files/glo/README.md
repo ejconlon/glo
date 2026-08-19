@@ -166,6 +166,12 @@ glo-build /py ^/lib/core test     # exclude a project
 glo-build precommit ^test         # precommit without test subtargets
 ```
 
+Targets declared in a project's `build.json` are project-local: invoke them
+with an explicit selector such as `glo-build /lib/foo serve`. Their names do
+not become workspace-wide commands and cannot consume arguments to another
+project's target. Arguments after `--` are passed to the selected target
+exactly, even when they match a core command or another project's target name.
+
 Mode flags:
 
 ```sh
