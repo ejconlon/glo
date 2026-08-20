@@ -1560,11 +1560,13 @@ def cmd_typecheck_rs(script: Script, project: Project, args: list[str]) -> None:
 
 
 @command("lint", "Lint code", lang=Lang.Rust)
-def cmd_lint_rs(script: Script, project: Project, args: list[str]) -> None:
+def cmd_lint_rs(script: Script, project: Project, _args: list[str]) -> None:
     """Lint Rust code with clippy."""
-    del args  # unused
     script.info(f"Linting {project.path}")
-    project.emit_cargo(script, ["clippy", "--", "-D", "warnings"])
+    project.emit_cargo(
+        script,
+        ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    )
 
 
 @command("unit", "Run unit tests", lang=Lang.Rust)
