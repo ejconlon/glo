@@ -1,4 +1,4 @@
-FROM rockylinux/rockylinux:10-minimal AS base
+FROM rockylinux/rockylinux:10.2-minimal
 
 USER root
 WORKDIR /root
@@ -68,9 +68,30 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         libffi-devel \
         zlib-devel
 
+# Install Garage from the official checksummed release binaries.
+# The default image contains no Garage executable.
+ARG GARAGE_ENABLED=0
+ARG GARAGE_VERSION=2.3.0
+ARG GARAGE_SHA256_X64=f98d317942bb341151a2775162016bb50cf86b865d0108de03eb5db16e2120cd
+ARG GARAGE_SHA256_ARM64=8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2
+RUN if [ "${GARAGE_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) target="x86_64-unknown-linux-musl"; checksum="${GARAGE_SHA256_X64}" ;; \
+        aarch64) target="aarch64-unknown-linux-musl"; checksum="${GARAGE_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    url="https://garagehq.deuxfleurs.fr/_releases/v${GARAGE_VERSION}/${target}/garage"; \
+    curl -fsSLo /tmp/garage "${url}"; \
+    echo "${checksum}  /tmp/garage" | sha256sum -c -; \
+    install -m 0755 /tmp/garage /usr/local/bin/garage; \
+    rm -f /tmp/garage; \
+    garage --version; \
+    fi
+
 # Install an explicit PostgreSQL 18 client, server, and development boundary.
 # The default image contains no PostgreSQL packages or initialized cluster.
-FROM base AS postgres-feature
 ARG POSTGRES_ENABLED=0
 ARG PGDG_REPO_RPM_VERSION=42.0-66
 ARG PGDG_REPO_SHA256_X64=47cc6e0243230a0ebe79552ed932688ce58552bbc570e19b0888b3e8c88a66c7
@@ -102,8 +123,6 @@ RUN groupadd --gid 1000 user \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user
 COPY --chmod=0755 files/glo/bin/glo-postgres /usr/local/bin/glo-postgres
 ENV PATH="/usr/pgsql-18/bin:${PATH}"
-
-FROM postgres-feature AS development
 
 # Upgrade pip and install uv
 RUN python3 -m pip install --no-cache-dir --upgrade pip \

@@ -293,6 +293,26 @@ The cluster listens only on `127.0.0.1:55432`, uses the fixed local-only
 are `glo postgres status`, `url`, and `stop`. No cluster is initialized or
 started merely by enabling the image feature.
 
+On a host without PostgreSQL 18, the same enabled devcontainer image can own a
+dedicated Docker cluster while exposing only the host loopback port:
+
+```sh
+GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --docker start
+eval "$(GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --docker env)"
+glo-postgres --docker stop
+```
+
+Docker mode bind-mounts the absolute `GLO_POSTGRES_ROOT` into the container, so
+cluster files survive container removal. It defaults to the image
+`devcontainer-WORKSPACE`; `GLO_POSTGRES_DOCKER_IMAGE` and
+`GLO_POSTGRES_DOCKER_CONTAINER` select explicit alternatives.
+
+### Optional Garage object store
+
+`GARAGE_ENABLED=1` installs the pinned, SHA-256-verified Garage release binary
+for the image architecture. It defaults to `0`, and enabling it installs no
+service or configuration and starts no process.
+
 ### Local KDBX credentials
 
 `glo-secrets` is a foreground wrapper around SecretSpec's built-in KDBX and

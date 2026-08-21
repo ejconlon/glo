@@ -29,6 +29,10 @@ step "PostgreSQL tooling"
 "${GLO_DIR}/test/postgres-tooling.sh"
 ok "PostgreSQL tooling"
 
+step "Garage tooling"
+"${GLO_DIR}/test/garage-tooling.sh"
+ok "Garage tooling"
+
 # --- Bootstrap ---
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"
