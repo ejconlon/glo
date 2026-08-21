@@ -18,6 +18,9 @@ grep -Fq '127.0.0.1' "$GLO_POSTGRES"
 grep -Fq 'PostgreSQL 18 is unavailable; rebuild with POSTGRES_ENABLED=1 or use --docker' \
     "$GLO_POSTGRES"
 grep -Fq 'GLO_POSTGRES_DOCKER_IMAGE' "$GLO_POSTGRES"
+grep -Fq 'run) run_cluster' "$GLO_POSTGRES"
+# shellcheck disable=SC2016  # Assert the helper retains runtime expansion.
+grep -Fq -- '-D "$postgres_data"' "$GLO_POSTGRES"
 # shellcheck disable=SC2016  # Assert the helper retains runtime expansion.
 grep -Fq 'type=bind,source=${mounted_root},target=${docker_state_root}' "$GLO_POSTGRES"
 # shellcheck disable=SC2016  # Assert the helper retains runtime expansion.
@@ -33,5 +36,6 @@ shellcheck "$GLO_POSTGRES"
 help_output="$($GLO_POSTGRES --help 2>&1 || true)"
 grep -Fq 'POSTGRES_ENABLED=1' <<<"$help_output"
 grep -Fq -- '--docker' <<<"$help_output"
+grep -Fq '{run|start|stop|status|url|env}' <<<"$help_output"
 
 printf '[OK] PostgreSQL tooling checks passed\n'

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: glo-garage {run|version}
+
+Run the optional Garage object store installed when GARAGE_ENABLED=1. The run
+command requires GARAGE_CONFIG_FILE and starts Garage's single-node development
+mode with its configured default bucket.
+EOF
+}
+
+fail() {
+    printf '[E] %s\n' "$*" >&2
+    exit 1
+}
+
+require_feature() {
+    command -v garage >/dev/null 2>&1 \
+        || fail "Garage is unavailable; rebuild with GARAGE_ENABLED=1"
+}
+
+case "${1:-}" in
+    run)
+        require_feature
+        [[ -n "${GARAGE_CONFIG_FILE:-}" ]] \
+            || fail "GARAGE_CONFIG_FILE is required"
+        [[ "${GARAGE_CONFIG_FILE}" == /* ]] \
+            || fail "GARAGE_CONFIG_FILE must be an absolute path"
+        exec garage server --single-node --default-bucket
+        ;;
+    version)
+        require_feature
+        exec garage --version
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

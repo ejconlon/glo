@@ -9,6 +9,7 @@ case "${1:-}" in
     agent)     shift; exec "${_GLO_BIN_DIR}/glo-agent" "$@" ;;
     build)     shift; GLO_BUILD_CMD="glo build" exec "${_GLO_BIN_DIR}/glo-build" "$@" ;;
     gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
+    garage)    shift; exec "${_GLO_BIN_DIR}/glo-garage" "$@" ;;
     local)     shift; exec "${_GLO_BIN_DIR}/glo-local" "$@" ;;
     notes)     shift; exec "${_GLO_BIN_DIR}/glo-notes" "$@" ;;
     postgres)  shift; exec "${_GLO_BIN_DIR}/glo-postgres" "$@" ;;
@@ -25,6 +26,7 @@ Commands:
   agent      Agent-aware issue CLI with focus stack (glo-agent --help)
   build      Lightweight build system (glo-build --help)
   gen        Generate a lib component from a template (glo-gen --help)
+  garage     Run the optional Garage development object store
   local      Install host dependencies (glo-local --help)
   notes      zk notebook wrapper for base/ (glo-notes --help)
   postgres   Disposable PostgreSQL 18 test cluster (when enabled)
@@ -33,7 +35,7 @@ Commands:
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|gen|local|notes|postgres|secrets|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|gen|garage|local|notes|postgres|secrets|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

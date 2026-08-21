@@ -6,7 +6,7 @@ Use glo to manage work in this repository: issues, agent focus, builds, generate
 
 - Run commands from inside the workspace git repository.
 - The workspace root is the nearest parent directory containing `.git`.
-- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-garage`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
 - `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes.
 - Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
 - Use issues for durable task state. Use notes for longer-lived project knowledge.
@@ -290,8 +290,9 @@ export MY_PROJECT_TEST_DATABASE_URL="$GLO_POSTGRES_URL"
 The cluster listens only on `127.0.0.1:55432`, uses the fixed local-only
 `glo:glo` credential and `glo_test` database, and stores disposable state under
 `${XDG_STATE_HOME:-$HOME/.local/state}/glo/postgres-18`. The remaining commands
-are `glo postgres status`, `url`, and `stop`. No cluster is initialized or
-started merely by enabling the image feature.
+are `glo postgres status`, `url`, and `stop`. `glo postgres run` initializes the
+same cluster and then owns PostgreSQL in the foreground for container use. No
+cluster is initialized or started merely by enabling the image feature.
 
 On a host without PostgreSQL 18, the same enabled devcontainer image can own a
 dedicated Docker cluster while exposing only the host loopback port:
@@ -311,7 +312,9 @@ cluster files survive container removal. It defaults to the image
 
 `GARAGE_ENABLED=1` installs the pinned, SHA-256-verified Garage release binary
 for the image architecture. It defaults to `0`, and enabling it installs no
-service or configuration and starts no process.
+service or configuration and starts no process. `glo garage run` requires an
+absolute `GARAGE_CONFIG_FILE` and owns Garage's single-node development process
+in the foreground for container use.
 
 ### Local KDBX credentials
 

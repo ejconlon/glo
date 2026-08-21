@@ -50,6 +50,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         ripgrep \
         shellcheck \
         sqlite \
+        sqlite-devel \
         strace \
         tar \
         tmux \
@@ -121,7 +122,6 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
 
 RUN groupadd --gid 1000 user \
     && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user
-COPY --chmod=0755 files/glo/bin/glo-postgres /usr/local/bin/glo-postgres
 ENV PATH="/usr/pgsql-18/bin:${PATH}"
 
 # Upgrade pip and install uv
@@ -504,6 +504,7 @@ COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
+COPY --chmod=0755 files/glo/bin/glo-garage /opt/glo/bin/glo-garage
 COPY --chmod=0755 files/glo/bin/glo-secrets /opt/glo/bin/glo-secrets
 COPY --chmod=0755 files/glo/bin/glo-postgres /opt/glo/bin/glo-postgres
 COPY files/glo/lib/ /opt/glo/lib/

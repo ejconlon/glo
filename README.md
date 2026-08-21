@@ -38,6 +38,7 @@ local PostgreSQL integration tests:
 
 Inside an enabled container, `glo postgres start` lazily initializes and starts
 a disposable PostgreSQL 18 cluster listening only on `127.0.0.1:55432`.
+`glo postgres run` owns the same cluster as a foreground container process.
 `eval "$(glo postgres env)"` exports `GLO_POSTGRES_URL`; map that value to the
 project's own test configuration rather than making application code depend on
 Glo. Use `glo postgres status`, `url`, and `stop` for the remaining lifecycle.
@@ -56,6 +57,8 @@ container's removal. Image and container names can be overridden with
 The generated devcontainer also sets `GARAGE_ENABLED` to `0`. Set it to `1` to
 install the pinned, SHA-256-verified Garage release binary for the image
 architecture. The feature installs no configuration or service and starts no
-background process.
+background process. `glo garage run` requires an absolute
+`GARAGE_CONFIG_FILE` and owns Garage's single-node development process in the
+foreground for container use.
 
 For host-local dependencies, run `bin/glo-local --dry-run all` to inspect the installer, then run the specific subcommands you need. `glo-local` supports Arch Linux via `pacman` and macOS via `brew`.

@@ -17,7 +17,7 @@ docker_state_root=/var/lib/glo-postgres
 
 usage() {
     cat <<'EOF'
-Usage: glo-postgres [--docker] {start|stop|status|url|env}
+Usage: glo-postgres [--docker] {run|start|stop|status|url|env}
 
 Manage the disposable loopback-only PostgreSQL 18 cluster included when the
 devcontainer is built with POSTGRES_ENABLED=1. Use --docker on a host without
@@ -137,6 +137,19 @@ start_cluster() {
             "$postgres_database"
     fi
     printf 'PostgreSQL 18 ready at %s\n' "$(database_url)"
+}
+
+run_cluster() {
+    start_cluster
+    "${postgres_bin}/pg_ctl" \
+        --pgdata="$postgres_data" \
+        --wait \
+        --mode=fast stop >/dev/null
+    exec "${postgres_bin}/postgres" \
+        -D "$postgres_data" \
+        -h "$postgres_listen_host" \
+        -p "$postgres_port" \
+        -k "$postgres_socket"
 }
 
 stop_cluster() {
@@ -292,6 +305,7 @@ fi
 
 require_feature
 case "$command_name" in
+    run) run_cluster ;;
     start) start_cluster ;;
     stop) stop_cluster ;;
     status)
