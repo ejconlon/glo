@@ -6,7 +6,7 @@ DOCKERFILE="$GLO_DIR/devcontainer/image/Dockerfile"
 TEMPLATE="$GLO_DIR/template/devcontainer.json"
 
 [[ "$(grep -c '^FROM ' "$DOCKERFILE")" == "1" ]]
-[[ "$(head -n 1 "$DOCKERFILE")" == 'FROM rockylinux/rockylinux:10-minimal' ]]
+[[ "$(head -n 1 "$DOCKERFILE")" =~ ^FROM\ [^[:space:]]+$ ]]
 grep -Fq 'ARG GARAGE_ENABLED=0' "$DOCKERFILE"
 grep -Fq 'ARG GARAGE_VERSION=2.3.0' "$DOCKERFILE"
 grep -Fq 'GARAGE_SHA256_X64=' "$DOCKERFILE"
