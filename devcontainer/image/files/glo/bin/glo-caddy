@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: glo-caddy {run|validate|version}
+
+Run the optional Caddy HTTPS edge installed when CADDY_ENABLED=1. The run and
+validate commands require an absolute CADDY_CONFIG_FILE.
+EOF
+}
+
+fail() {
+    printf '[E] %s\n' "$*" >&2
+    exit 1
+}
+
+require_feature() {
+    command -v caddy >/dev/null 2>&1 \
+        || fail "Caddy is unavailable; rebuild with CADDY_ENABLED=1"
+}
+
+require_config() {
+    [[ -n "${CADDY_CONFIG_FILE:-}" ]] || fail "CADDY_CONFIG_FILE is required"
+    [[ "${CADDY_CONFIG_FILE}" == /* ]] \
+        || fail "CADDY_CONFIG_FILE must be an absolute path"
+    [[ -f "${CADDY_CONFIG_FILE}" ]] || fail "CADDY_CONFIG_FILE does not exist"
+}
+
+case "${1:-}" in
+    run)
+        require_feature
+        require_config
+        exec caddy run --config "$CADDY_CONFIG_FILE" --adapter caddyfile
+        ;;
+    validate)
+        require_feature
+        require_config
+        exec caddy validate --config "$CADDY_CONFIG_FILE" --adapter caddyfile
+        ;;
+    version)
+        require_feature
+        exec caddy version
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

@@ -52,6 +52,14 @@ Set `GLO_POSTGRES_ROOT` to an absolute host directory such as
 container's removal. Image and container names can be overridden with
 `GLO_POSTGRES_DOCKER_IMAGE` and `GLO_POSTGRES_DOCKER_CONTAINER`.
 
+## Optional Caddy
+
+The generated devcontainer sets `CADDY_ENABLED` to `0`. Set it to `1` to
+install the pinned, SHA-512-verified official Caddy release binary for the
+image architecture. The feature installs no configuration or service and
+starts no background process; projects supply their own configuration and run
+it in the foreground with `glo caddy run`.
+
 ## Optional Garage
 
 The generated devcontainer also sets `GARAGE_ENABLED` to `0`. Set it to `1` to

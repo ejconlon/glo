@@ -220,10 +220,11 @@ build_docker_args() {
     [[ -n "${HOST_TZ}" ]] && args_ref+=(-e "TZ=${HOST_TZ}")
 }
 
-# Create temp file for the build plan (in workspace so docker can access it)
-PLAN_NAME="glo-build.$$.sh"
-PLAN_PATH="${WORKSPACE_DIR}/.glo/cache/${PLAN_NAME}"
+# Create a unique plan file in the workspace so concurrent containers can share
+# its mounted Glo build state without overwriting each other's commands.
 mkdir -p "${WORKSPACE_DIR}/.glo/cache"
+PLAN_PATH="$(mktemp "${WORKSPACE_DIR}/.glo/cache/glo-build.XXXXXXXXXX.sh")"
+PLAN_NAME="${PLAN_PATH##*/}"
 
 cleanup() {
     rm -f "$PLAN_PATH"

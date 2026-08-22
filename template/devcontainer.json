@@ -5,6 +5,7 @@
     "context": "image",
     "args": {
       "PROJECT_NAME": "__PROJECT_NAME__",
+      "CADDY_ENABLED": "0",
       "POSTGRES_ENABLED": "0",
       "GARAGE_ENABLED": "0"
     }

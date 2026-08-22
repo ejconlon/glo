@@ -8,6 +8,7 @@ case "${1:-}" in
     issue)     shift; exec "${_GLO_BIN_DIR}/glo-issue" "$@" ;;
     agent)     shift; exec "${_GLO_BIN_DIR}/glo-agent" "$@" ;;
     build)     shift; GLO_BUILD_CMD="glo build" exec "${_GLO_BIN_DIR}/glo-build" "$@" ;;
+    caddy)     shift; exec "${_GLO_BIN_DIR}/glo-caddy" "$@" ;;
     gen)       shift; exec "${_GLO_BIN_DIR}/glo-gen" "$@" ;;
     garage)    shift; exec "${_GLO_BIN_DIR}/glo-garage" "$@" ;;
     local)     shift; exec "${_GLO_BIN_DIR}/glo-local" "$@" ;;
@@ -25,6 +26,7 @@ Commands:
   issue      Ticket system (glo-issue --help)
   agent      Agent-aware issue CLI with focus stack (glo-agent --help)
   build      Lightweight build system (glo-build --help)
+  caddy      Run the optional Caddy HTTPS edge
   gen        Generate a lib component from a template (glo-gen --help)
   garage     Run the optional Garage development object store
   local      Install host dependencies (glo-local --help)
@@ -35,7 +37,7 @@ Commands:
 EOF
         ;;
     *)
-        echo "Usage: glo {issue|agent|build|gen|garage|local|notes|postgres|secrets|readme} [args]" >&2
+        echo "Usage: glo {issue|agent|build|caddy|gen|garage|local|notes|postgres|secrets|readme} [args]" >&2
         echo "Run 'glo help' for documentation." >&2
         exit 1
         ;;

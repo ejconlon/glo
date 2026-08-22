@@ -69,6 +69,31 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         libffi-devel \
         zlib-devel
 
+# Install Caddy from the official checksummed release binaries.
+# The default image contains no Caddy executable.
+ARG CADDY_ENABLED=0
+ARG CADDY_VERSION=2.11.4
+ARG CADDY_SHA512_X64=8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9
+ARG CADDY_SHA512_ARM64=d5a7c423853c24a799765e0e8210d5c7c22a8f56ed37a3cae2fb9f58be138853c02b4efd6b59d576e6d8c7c0d30b9c1592deeaa6a536ff69bcca23b8c1ea709c
+RUN if [ "${CADDY_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) caddy_arch="amd64"; checksum="${CADDY_SHA512_X64}" ;; \
+        aarch64) caddy_arch="arm64"; checksum="${CADDY_SHA512_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    archive="caddy_${CADDY_VERSION}_linux_${caddy_arch}.tar.gz"; \
+    url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/${archive}"; \
+    curl -fsSLo "/tmp/${archive}" "${url}"; \
+    echo "${checksum}  /tmp/${archive}" | sha512sum -c -; \
+    mkdir -p /tmp/caddy-dist; \
+    tar -xzf "/tmp/${archive}" -C /tmp/caddy-dist caddy; \
+    install -m 0755 /tmp/caddy-dist/caddy /usr/local/bin/caddy; \
+    rm -rf /tmp/caddy-dist "/tmp/${archive}"; \
+    caddy version; \
+    fi
+
 # Install Garage from the official checksummed release binaries.
 # The default image contains no Garage executable.
 ARG GARAGE_ENABLED=0
@@ -504,6 +529,7 @@ COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
 COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
 COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
 COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
+COPY --chmod=0755 files/glo/bin/glo-caddy /opt/glo/bin/glo-caddy
 COPY --chmod=0755 files/glo/bin/glo-garage /opt/glo/bin/glo-garage
 COPY --chmod=0755 files/glo/bin/glo-secrets /opt/glo/bin/glo-secrets
 COPY --chmod=0755 files/glo/bin/glo-postgres /opt/glo/bin/glo-postgres

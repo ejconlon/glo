@@ -33,6 +33,10 @@ step "Garage tooling"
 "${GLO_DIR}/test/garage-tooling.sh"
 ok "Garage tooling"
 
+step "Caddy tooling"
+"${GLO_DIR}/test/caddy-tooling.sh"
+ok "Caddy tooling"
+
 # --- Bootstrap ---
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"

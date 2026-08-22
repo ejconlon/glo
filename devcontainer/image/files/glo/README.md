@@ -316,6 +316,13 @@ service or configuration and starts no process. `glo garage run` requires an
 absolute `GARAGE_CONFIG_FILE` and owns Garage's single-node development process
 in the foreground for container use.
 
+### Optional Caddy HTTPS edge
+
+`CADDY_ENABLED=1` installs the pinned, SHA-512-verified official Caddy release
+binary for the image architecture. It defaults to `0`, installs no service or
+configuration, and starts no process. Projects supply their own Caddyfile and
+run Caddy in the foreground with `glo caddy run`.
+
 ### Local KDBX credentials
 
 `glo-secrets` is a foreground wrapper around SecretSpec's built-in KDBX and
