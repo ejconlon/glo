@@ -318,8 +318,10 @@ in the foreground for container use.
 
 ### Optional Caddy HTTPS edge
 
-`CADDY_ENABLED=1` installs the pinned, SHA-512-verified official Caddy release
-binary for the image architecture. It defaults to `0`, installs no service or
+`CADDY_ENABLED=1` builds Caddy with `caddy-l4` from exact commit-SHA source
+archives whose SHA-256 digests are pinned in the image Dockerfile. The temporary
+Go toolchain is also checksummed, and the source trees are supplied to `xcaddy`
+as local module replacements. It defaults to `0`, installs no service or
 configuration, and starts no process. Projects supply their own Caddyfile and
 run Caddy in the foreground with `glo caddy run`.
 

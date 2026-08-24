@@ -69,29 +69,75 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         libffi-devel \
         zlib-devel
 
-# Install Caddy from the official checksummed release binaries.
+# Build Caddy with the pinned Layer 4 module using a temporary Go toolchain.
 # The default image contains no Caddy executable.
 ARG CADDY_ENABLED=0
-ARG CADDY_VERSION=2.11.4
-ARG CADDY_SHA512_X64=8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9
-ARG CADDY_SHA512_ARM64=d5a7c423853c24a799765e0e8210d5c7c22a8f56ed37a3cae2fb9f58be138853c02b4efd6b59d576e6d8c7c0d30b9c1592deeaa6a536ff69bcca23b8c1ea709c
+# Caddy v2.11.4.
+ARG CADDY_COMMIT=e2eee6a7fce366321294c9c2a79f3146891dcbdf
+ARG CADDY_SOURCE_SHA256=a593bd7077c76102ca76d19287a5e247d4e359dd67eddbc933f865afd3c131eb
+# caddy-l4 v0.1.2.
+ARG CADDY_L4_COMMIT=42db5690dea199f930a6f08005fe2e4aab10dcc9
+ARG CADDY_L4_SOURCE_SHA256=a2def12c2a1c45b859c1412fa520f4fa1b630cc2ba69a6a254f58051080942a1
+# xcaddy v0.4.5.
+ARG XCADDY_COMMIT=328cac711a1fe80041c3b79db2dfbb4e10330a05
+ARG XCADDY_SOURCE_SHA256=23dbf0f640a1eb6ae560d014f2c8f57cbe0ae740cdf874f3e712fe0286c8a6ab
+ARG CADDY_GO_VERSION=1.25.14
+ARG CADDY_GO_SHA256_X64=a21ae5633a269bcd7e90cf767e48225633795e99d831742cbf3397064fee7712
+ARG CADDY_GO_SHA256_ARM64=9bf234ea70ffec9347fdf6b22ce4add51717d3386a38a441e8c8743fceb5eaee
 RUN if [ "${CADDY_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
     case "${arch}" in \
-        x86_64) caddy_arch="amd64"; checksum="${CADDY_SHA512_X64}" ;; \
-        aarch64) caddy_arch="arm64"; checksum="${CADDY_SHA512_ARM64}" ;; \
+        x86_64) go_arch="amd64"; checksum="${CADDY_GO_SHA256_X64}" ;; \
+        aarch64) go_arch="arm64"; checksum="${CADDY_GO_SHA256_ARM64}" ;; \
         *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
-    archive="caddy_${CADDY_VERSION}_linux_${caddy_arch}.tar.gz"; \
-    url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/${archive}"; \
+    archive="go${CADDY_GO_VERSION}.linux-${go_arch}.tar.gz"; \
+    url="https://go.dev/dl/${archive}"; \
     curl -fsSLo "/tmp/${archive}" "${url}"; \
-    echo "${checksum}  /tmp/${archive}" | sha512sum -c -; \
-    mkdir -p /tmp/caddy-dist; \
-    tar -xzf "/tmp/${archive}" -C /tmp/caddy-dist caddy; \
-    install -m 0755 /tmp/caddy-dist/caddy /usr/local/bin/caddy; \
-    rm -rf /tmp/caddy-dist "/tmp/${archive}"; \
+    echo "${checksum}  /tmp/${archive}" | sha256sum -c -; \
+    mkdir -p /tmp/caddy-build/toolchain /tmp/caddy-build/bin; \
+    tar -xzf "/tmp/${archive}" -C /tmp/caddy-build/toolchain; \
+    export PATH="/tmp/caddy-build/toolchain/go/bin:${PATH}"; \
+    export GOBIN=/tmp/caddy-build/bin; \
+    export GOPATH=/tmp/caddy-build/gopath; \
+    export GOCACHE=/tmp/caddy-build/cache; \
+    export GOMODCACHE=/tmp/caddy-build/modules; \
+    export GOTOOLCHAIN=local; \
+    export CGO_ENABLED=0; \
+    fetch_source() { \
+        source_name="$1"; \
+        source_repository="$2"; \
+        source_commit="$3"; \
+        source_checksum="$4"; \
+        source_archive="/tmp/caddy-build/${source_name}.tar.gz"; \
+        source_directory="/tmp/caddy-build/source/${source_name}"; \
+        curl -fsSLo "${source_archive}" \
+            "https://codeload.github.com/${source_repository}/tar.gz/${source_commit}"; \
+        echo "${source_checksum}  ${source_archive}" | sha256sum -c -; \
+        mkdir -p "${source_directory}"; \
+        tar -xzf "${source_archive}" --strip-components=1 -C "${source_directory}"; \
+    }; \
+    fetch_source caddy caddyserver/caddy \
+        "${CADDY_COMMIT}" "${CADDY_SOURCE_SHA256}"; \
+    fetch_source caddy-l4 mholt/caddy-l4 \
+        "${CADDY_L4_COMMIT}" "${CADDY_L4_SOURCE_SHA256}"; \
+    fetch_source xcaddy caddyserver/xcaddy \
+        "${XCADDY_COMMIT}" "${XCADDY_SOURCE_SHA256}"; \
+    cd /tmp/caddy-build/source/xcaddy; \
+    go install ./cmd/xcaddy; \
+    cd /root; \
+    /tmp/caddy-build/bin/xcaddy build "${CADDY_COMMIT}" \
+        --replace "github.com/caddyserver/caddy/v2=/tmp/caddy-build/source/caddy" \
+        --with "github.com/mholt/caddy-l4@${CADDY_L4_COMMIT}" \
+        --replace "github.com/mholt/caddy-l4=/tmp/caddy-build/source/caddy-l4" \
+        --output /tmp/caddy-build/caddy; \
+    install -m 0755 /tmp/caddy-build/caddy /usr/local/bin/caddy; \
+    rm -rf /tmp/caddy-build "/tmp/${archive}"; \
     caddy version; \
+    caddy list-modules | grep -Fx layer4; \
+    caddy list-modules | grep -Fx layer4.handlers.proxy; \
+    caddy list-modules | grep -Fx layer4.handlers.tls; \
     fi
 
 # Install Garage from the official checksummed release binaries.

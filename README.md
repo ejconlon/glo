@@ -55,10 +55,15 @@ container's removal. Image and container names can be overridden with
 ## Optional Caddy
 
 The generated devcontainer sets `CADDY_ENABLED` to `0`. Set it to `1` to
-install the pinned, SHA-512-verified official Caddy release binary for the
-image architecture. The feature installs no configuration or service and
-starts no background process; projects supply their own configuration and run
-it in the foreground with `glo caddy run`.
+build the pinned Caddy release with the pinned `caddy-l4` module. The build uses
+a temporary checksummed Go toolchain. It downloads Caddy, `caddy-l4`, and
+`xcaddy` as exact commit-SHA source archives, verifies each archive against its
+pinned SHA-256 digest, and supplies the extracted Caddy sources to `xcaddy` as
+local module replacements. No mutable tag or branch selects source at build
+time, and neither the Go toolchain nor `xcaddy` is retained in the image. The
+feature installs no configuration or service and starts no background process;
+projects supply their own configuration and run it in the foreground with
+`glo caddy run`.
 
 ## Optional Garage
 
