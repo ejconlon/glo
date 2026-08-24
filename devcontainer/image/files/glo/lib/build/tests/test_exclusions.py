@@ -17,6 +17,7 @@ from glo_build.cli import (
     parse_cli_arguments,
     set_workspace_root,
     validate_exclusion,
+    validate_project_only_selections,
 )
 
 
@@ -361,6 +362,20 @@ class TestProjectLocalCustomTargets:
         assert result is not None
         commands = [item for item in result if isinstance(item, CommandItem)]
         assert commands == [CommandItem("run", ["status", "all", "--help"], set())]
+
+
+class TestProjectOnlyCommands:
+    """Tests for commands that require an explicit project selection."""
+
+    def test_compile_requires_a_preceding_project(self) -> None:
+        """Reject workspace-wide compilation before either execution mode plans it."""
+        bare = parse_args_sequence(["compile", "debug"], MOCK_PROJECTS)
+        selected = parse_args_sequence(["/lib/core", "compile", "debug"], MOCK_PROJECTS)
+
+        assert bare is not None
+        assert not validate_project_only_selections(bare)
+        assert selected is not None
+        assert validate_project_only_selections(selected)
 
 
 class TestSubprojectExpansion:

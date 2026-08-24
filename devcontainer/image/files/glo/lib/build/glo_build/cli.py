@@ -33,6 +33,8 @@ Examples:
     glo-build --dryrun /py/core precommit
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -40,6 +42,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from pathlib import Path
@@ -72,6 +75,10 @@ GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
 RED = "\033[0;31m"
 RESET = "\033[0m"
+
+RUST_TARGET_SOFT_LIMIT_GIB = 32
+RUST_TARGET_HARD_LIMIT_GIB = 64
+RUST_TARGET_PRUNE_MIN_ITERATIONS = 10
 
 
 def log_error(msg: str) -> None:
@@ -160,6 +167,7 @@ class Script:
         self._color = color
         self._export_stack: list[list[str]] = []  # Track exports per pushd level
         self._current_project_path: str | None = None  # Track current project context
+        self._pruned_rust_projects: set[str] = set()
 
     def _add(self, line: str) -> None:
         """Add a line with current indentation."""
@@ -268,6 +276,13 @@ class Script:
         if path_str.startswith(workspace_str):
             return "${WORKSPACE}" + path_str[len(workspace_str) :]
         return path_str
+
+    def claim_rust_target_prune(self, project_path: str) -> bool:
+        """Claim the one Rust target-pruning check for a project in this script."""
+        if project_path in self._pruned_rust_projects:
+            return False
+        self._pruned_rust_projects.add(project_path)
+        return True
 
     def venv_path(self, path: Path | str) -> str:
         """Convert a path to use ${VIRTUAL_ENV} if it starts with the venv path."""
@@ -576,6 +591,49 @@ class TargetStep:
     args: list[str] | None = None  # Args for target/command steps
 
 
+_NON_BUILDING_CARGO_SUBCOMMANDS = frozenset(
+    {
+        "clean",
+        "fetch",
+        "fmt",
+        "help",
+        "locate-project",
+        "metadata",
+        "search",
+        "tree",
+        "version",
+    }
+)
+
+
+def cargo_subcommand_uses_target(subcommand: str) -> bool:
+    """Return whether a Cargo subcommand may create target artifacts."""
+    return subcommand not in _NON_BUILDING_CARGO_SUBCOMMANDS
+
+
+def raw_command_uses_cargo_target(command: str) -> bool:
+    """Detect target-producing Cargo invocations in a raw Bash command."""
+    pattern = re.compile(r"(?:^|[\n;&|]\s*)cargo\s+(?:\+\S+\s+)?([A-Za-z0-9_-]+)")
+    return any(
+        cargo_subcommand_uses_target(match.group(1))
+        for match in pattern.finditer(command)
+    )
+
+
+def target_steps_use_cargo_target(steps: list[TargetStep]) -> bool:
+    """Return whether raw commands in custom target steps may build Rust artifacts."""
+    for step in steps:
+        if isinstance(step.command, str) and raw_command_uses_cargo_target(
+            step.command
+        ):
+            return True
+        if isinstance(step.command, list) and any(
+            raw_command_uses_cargo_target(command) for command in step.command
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class BuildConfig:
     """Build configuration from build.json.
@@ -733,6 +791,31 @@ class Project:
         """Get the build configuration from build.json."""
         rel_path = self.path.lstrip("/")
         return read_build_json(self.abs_path, rel_path)
+
+    @property
+    def rust_clean_selection(self) -> list[str]:
+        """Get Cargo arguments selecting this Rust package or virtual workspace."""
+        manifest_path = self.abs_path / "Cargo.toml"
+        try:
+            with manifest_path.open("rb") as manifest_file:
+                manifest = tomllib.load(manifest_file)
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise ValueError(
+                f"Cannot read Rust manifest {manifest_path}: {error}"
+            ) from error
+
+        package = manifest.get("package")
+        if isinstance(package, dict):
+            package_name = package.get("name")
+            if isinstance(package_name, str) and package_name:
+                return ["--package", package_name]
+
+        if isinstance(manifest.get("workspace"), dict):
+            return ["--workspace"]
+
+        raise ValueError(
+            f"Rust manifest {manifest_path} has neither a package name nor a workspace"
+        )
 
     def get_custom_target(self, name: str) -> list[TargetStep] | None:
         """Get a custom target by name from build.json, or None if not defined."""
@@ -920,12 +1003,171 @@ class Project:
         script.export("CARGO_TARGET_DIR", f"{rs_venv}/target")
         script.export("RS_VENV", rs_venv)
 
+    def emit_rust_target_prune(self, script: Script) -> None:
+        """Emit bounded cleanup for the complete private Rust target tree."""
+        if not script.claim_rust_target_prune(self.path):
+            return
+
+        package_clean = shcmd(["cargo", "clean", *self.rust_clean_selection])
+        complete_clean = shcmd(["cargo", "clean"])
+        script.raw(
+            "_GLO_RUST_TARGET_SOFT_LIMIT_GIB="
+            f'"${{GLO_RUST_TARGET_SOFT_LIMIT_GIB:-{RUST_TARGET_SOFT_LIMIT_GIB}}}"'
+        )
+        script.raw(
+            "_GLO_RUST_TARGET_HARD_LIMIT_GIB="
+            f'"${{GLO_RUST_TARGET_HARD_LIMIT_GIB:-{RUST_TARGET_HARD_LIMIT_GIB}}}"'
+        )
+        script.raw(
+            "_GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS="
+            f'"${{GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS:-{RUST_TARGET_PRUNE_MIN_ITERATIONS}}}"'
+        )
+        script.raw(
+            'case "${_GLO_RUST_TARGET_SOFT_LIMIT_GIB}" in '
+            "''|*[!0-9]*) echo \"[E] GLO_RUST_TARGET_SOFT_LIMIT_GIB must be a non-negative integer\" >&2; exit 2 ;; esac"
+        )
+        script.raw(
+            'case "${_GLO_RUST_TARGET_HARD_LIMIT_GIB}" in '
+            "''|*[!0-9]*) echo \"[E] GLO_RUST_TARGET_HARD_LIMIT_GIB must be a non-negative integer\" >&2; exit 2 ;; esac"
+        )
+        script.raw(
+            'if [ "${_GLO_RUST_TARGET_HARD_LIMIT_GIB}" -ne 0 ] '
+            '&& [ "${_GLO_RUST_TARGET_HARD_LIMIT_GIB}" '
+            '-lt "${_GLO_RUST_TARGET_SOFT_LIMIT_GIB}" ]; then'
+        )
+        script.raw(
+            '    echo "[E] GLO_RUST_TARGET_HARD_LIMIT_GIB must be zero or at least '
+            'GLO_RUST_TARGET_SOFT_LIMIT_GIB" >&2'
+        )
+        script.raw("    exit 2")
+        script.raw("fi")
+        script.raw("_glo_rust_target_prune_due=0")
+        script.raw('if [ "${_GLO_RUST_TARGET_SOFT_LIMIT_GIB}" -ne 0 ]; then')
+        script.raw(
+            '    case "${_GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS}" in '
+            "''|*[!0-9]*|0) echo \"[E] GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS "
+            'must be a positive integer" >&2; exit 2 ;; esac'
+        )
+        script.raw('    mkdir -p "${RS_VENV}"')
+        script.raw(
+            '    _glo_rust_target_prune_counter_file="${RS_VENV}/'
+            '.rust-target-prune-iterations"'
+        )
+        script.raw("    _glo_rust_target_prune_iterations=0")
+        script.raw('    if [ -f "${_glo_rust_target_prune_counter_file}" ]; then')
+        script.raw(
+            "        IFS= read -r _glo_rust_target_prune_iterations "
+            '< "${_glo_rust_target_prune_counter_file}" '
+            "|| _glo_rust_target_prune_iterations=0"
+        )
+        script.raw("    fi")
+        script.raw(
+            '    case "${_glo_rust_target_prune_iterations}" in '
+            "''|*[!0-9]*) _glo_rust_target_prune_iterations=0 ;; esac"
+        )
+        script.raw(
+            "    _glo_rust_target_prune_iterations="
+            '"$((_glo_rust_target_prune_iterations + 1))"'
+        )
+        script.raw(
+            '    if [ "${_glo_rust_target_prune_iterations}" -ge '
+            '"${_GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS}" ]; then'
+        )
+        script.raw("        _glo_rust_target_prune_due=1")
+        script.raw("    else")
+        script.raw(
+            "        printf '%s\\n' "
+            '"${_glo_rust_target_prune_iterations}" > '
+            '"${_glo_rust_target_prune_counter_file}"'
+        )
+        script.raw("    fi")
+        script.raw("fi")
+        script.raw(
+            'if [ "${_GLO_RUST_TARGET_SOFT_LIMIT_GIB}" -ne 0 ] '
+            '&& [ "${_glo_rust_target_prune_due}" -eq 1 ] '
+            '&& [ -d "${CARGO_TARGET_DIR}" ]; then'
+        )
+        script.raw(
+            '    _glo_rust_target_kib="$(du -sk "${CARGO_TARGET_DIR}" '
+            "2>/dev/null | awk 'NR == 1 { print $1 }')\""
+        )
+        script.raw('    _glo_rust_target_kib="${_glo_rust_target_kib:-0}"')
+        script.raw(
+            '    if [ "${_glo_rust_target_kib}" -gt '
+            '"$((_GLO_RUST_TARGET_SOFT_LIMIT_GIB * 1024 * 1024))" ]; then'
+        )
+        script.raw(
+            '        _glo_rust_target_gib="$(((_glo_rust_target_kib + 1024 * 1024 - 1) '
+            '/ (1024 * 1024)))"'
+        )
+        script.raw(
+            '        echo "[W] Rust target cache is ${_glo_rust_target_gib} GiB; '
+            f'pruning {self.path} package artifacts across all profiles and targets"'
+        )
+        script.raw(f"        echo {shquote('+ ' + package_clean)}")
+        script.raw(f"        {package_clean}")
+        script.raw('        _glo_rust_known_targets="$(rustc --print target-list)"')
+        script.raw('        for _glo_rust_target_path in "${CARGO_TARGET_DIR}"/*; do')
+        script.raw('            [ -d "${_glo_rust_target_path}" ] || continue')
+        script.raw('            _glo_rust_target_name="${_glo_rust_target_path##*/}"')
+        script.raw(
+            "            if printf '%s\\n' \"${_glo_rust_known_targets}\" "
+            '| grep -Fqx "${_glo_rust_target_name}"; then'
+        )
+        script.raw(
+            f'                echo "+ {package_clean} --target '
+            '${_glo_rust_target_name}"'
+        )
+        script.raw(
+            f'                {package_clean} --target "${{_glo_rust_target_name}}"'
+        )
+        script.raw("            fi")
+        script.raw("        done")
+        script.raw(
+            '        _glo_rust_target_kib="$(du -sk "${CARGO_TARGET_DIR}" '
+            "2>/dev/null | awk 'NR == 1 { print $1 }')\""
+        )
+        script.raw('        _glo_rust_target_kib="${_glo_rust_target_kib:-0}"')
+        script.raw(
+            '        if [ "${_GLO_RUST_TARGET_HARD_LIMIT_GIB}" -ne 0 ] '
+            '&& [ "${_glo_rust_target_kib}" -gt '
+            '"$((_GLO_RUST_TARGET_HARD_LIMIT_GIB * 1024 * 1024))" ]; then'
+        )
+        script.raw(
+            '            _glo_rust_target_gib="$(((_glo_rust_target_kib + 1024 * 1024 - 1) '
+            '/ (1024 * 1024)))"'
+        )
+        script.raw(
+            '            echo "[W] Rust target cache is still '
+            '${_glo_rust_target_gib} GiB; pruning the complete project target tree"'
+        )
+        script.raw(f"            echo {shquote('+ ' + complete_clean)}")
+        script.raw(f"            {complete_clean}")
+        script.raw("        fi")
+        script.raw("    fi")
+        script.raw("fi")
+        script.raw('if [ "${_glo_rust_target_prune_due}" -eq 1 ]; then')
+        script.raw("    printf '0\\n' > \"${_glo_rust_target_prune_counter_file}\"")
+        script.raw("fi")
+        script.raw(
+            "unset _GLO_RUST_TARGET_SOFT_LIMIT_GIB "
+            "_GLO_RUST_TARGET_HARD_LIMIT_GIB "
+            "_GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS "
+            "_glo_rust_target_prune_counter_file "
+            "_glo_rust_target_prune_iterations _glo_rust_target_prune_due "
+            "_glo_rust_target_kib "
+            "_glo_rust_target_gib _glo_rust_known_targets "
+            "_glo_rust_target_path _glo_rust_target_name"
+        )
+
     def emit_cargo(self, script: Script, args: list[str]) -> None:
         """Emit a cargo command for Rust builds."""
         path = script.workspace_path(self.abs_path)
         is_new = script.enter_project(path)
         if is_new:
             self.emit_rs_env(script)
+        if args and cargo_subcommand_uses_target(args[0]):
+            self.emit_rust_target_prune(script)
         script.run(["cargo"] + args)
 
     def emit_ts_env(self, script: Script) -> None:
@@ -1574,6 +1816,53 @@ def cmd_unit_rs(script: Script, project: Project, args: list[str]) -> None:
     """Run Rust tests with cargo test."""
     script.info(f"Testing {project.path}")
     project.emit_cargo(script, ["test"] + args)
+
+
+@command(
+    "compile",
+    "Compile Rust with a debug or release profile and optional cross environment",
+    project_only=True,
+    lang=Lang.Rust,
+)
+def cmd_compile_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Compile Rust for one profile and optional Cargo target environment."""
+    if not args or args[0] not in ("debug", "release"):
+        usage = (
+            f"[E] Usage: {cli_invocation()} {project.path} "
+            "compile debug|release [crossenv] [cargo arguments...]"
+        )
+        script.raw(f"echo {shquote(usage)} >&2")
+        script.raw("exit 2")
+        return
+
+    profile = args[0]
+    remaining = list(args[1:])
+    cross_environment = None
+    if remaining and not remaining[0].startswith("-"):
+        cross_environment = remaining.pop(0)
+
+    cargo_arguments = ["build"]
+    if profile == "release":
+        cargo_arguments.append("--release")
+    if cross_environment is not None:
+        cargo_arguments.extend(["--target", cross_environment])
+    cargo_arguments.extend(remaining)
+
+    destination = f" for {cross_environment}" if cross_environment is not None else ""
+    script.info(f"Compiling {project.path} ({profile}){destination}")
+    project.emit_cargo(script, cargo_arguments)
+
+
+@command(
+    "release-test",
+    "Run Rust tests with release optimizations",
+    project_only=True,
+    lang=Lang.Rust,
+)
+def cmd_release_test_rs(script: Script, project: Project, args: list[str]) -> None:
+    """Run Rust tests using the release profile."""
+    script.info(f"Release-testing {project.path}")
+    project.emit_cargo(script, ["test", "--release"] + args)
 
 
 @command("clean", "Clean generated files and caches", lang=Lang.Rust)
@@ -2987,6 +3276,29 @@ def parse_args_sequence(
     return items
 
 
+def validate_project_only_selections(
+    items: list[ProjectItem | CommandItem],
+) -> bool:
+    """Require a preceding explicit project for every project-only command."""
+    has_project_selection = False
+    for item in items:
+        if isinstance(item, ProjectItem):
+            has_project_selection = True
+            continue
+        command_definition = COMMANDS.get(item.name)
+        if (
+            command_definition is not None
+            and command_definition.project_only
+            and not has_project_selection
+        ):
+            log_error(
+                f"{item.name} requires a project "
+                f"(e.g., {cli_invocation()} /lib/core {item.name})"
+            )
+            return False
+    return True
+
+
 def emit_custom_target(
     script: Script, project: Project, steps: list[TargetStep], args: list[str]
 ) -> None:
@@ -3006,6 +3318,8 @@ def emit_custom_target(
         project.emit_hs_env(script)
     elif project.language == Lang.Rust:
         project.emit_rs_env(script)
+        if target_steps_use_cargo_target(steps):
+            project.emit_rust_target_prune(script)
     elif project.language == Lang.TypeScript:
         project.emit_ts_env(script)
 
@@ -3488,6 +3802,9 @@ Examples:
             show_project_help(project_items[0].path)
             return 0
         log_error("No command specified")
+        return 1
+
+    if not validate_project_only_selections(items):
         return 1
 
     color = not parsed.nocolor

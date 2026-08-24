@@ -200,6 +200,42 @@ Language isolation:
 | `ts` | npm, tsc, eslint, prettier, jest | `.glo/venv/<name>/node_modules` |
 | `meta` | custom targets | custom |
 
+Rust projects have a standard compilation command, so ordinary crates do not
+need to repeat Cargo recipes in `build.json`:
+
+```sh
+glo-build /lib/example compile debug
+glo-build /lib/example compile release
+glo-build /lib/example compile release x86_64-pc-windows-gnu
+glo-build /lib/example compile release -- --bin app
+glo-build /lib/example release-test -- --test cli
+```
+
+`compile` requires an explicit project and a `debug` or `release` profile. Its
+optional cross environment is passed to Cargo as `--target`; the toolchain,
+linker, and any sysroot must already be configured by the workspace or project.
+Remaining arguments are forwarded to Cargo. `release-test` remains available
+for optimized test execution. A project may override either command with a
+custom target or reference a built-in command while adding arguments.
+
+Rust commands that can produce build artifacts also keep each project's complete
+`.glo/venv/<name>/target` tree bounded. Glo records target-producing invocations
+in `.glo/venv/<name>/.rust-target-prune-iterations` and checks the target tree at
+most once every 10 invocations by default. When a due check finds that the tree
+exceeds 32 GiB, Glo runs a package-scoped clean for the host and every recognized
+cross-target directory. That removes old and current root-crate artifacts across
+debug, release, custom, and cross profiles while retaining compiled dependencies.
+If the remaining target tree still exceeds 64 GiB, Glo removes the complete
+project target tree to clear obsolete dependency generations.
+
+Set `GLO_RUST_TARGET_SOFT_LIMIT_GIB` or `GLO_RUST_TARGET_HARD_LIMIT_GIB` to tune
+the integer GiB limits. Set `GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS` to a positive
+integer to tune the minimum number of target-producing invocations between
+checks; `1` checks every invocation. Set the soft limit to `0` to disable
+automatic cleanup and counter updates, or the hard limit to `0` to retain only
+package-scoped cleanup. Fetching, formatting, explicit cleaning, and non-Cargo
+custom targets do not increment the counter or run the retention check.
+
 ## Generating Components
 
 Use `glo-gen` to create a new `lib/` component from templates.

@@ -11,6 +11,9 @@ def test_rust_lint_covers_all_targets_and_features(tmp_path: Path) -> None:
     project_directory = tmp_path / "lib" / "example"
     project_directory.mkdir(parents=True)
     (project_directory / "build.json").write_text('{"language": "rs"}')
+    (project_directory / "Cargo.toml").write_text(
+        '[package]\nname = "example"\nversion = "0.1.0"\n'
+    )
     script = Script(tmp_path, color=False)
 
     cmd_lint_rs(script, Project("/lib/example", tmp_path), [])
