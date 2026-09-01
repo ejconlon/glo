@@ -12,22 +12,23 @@ postgres_socket="${postgres_root}/socket"
 postgres_log="${postgres_root}/postgres.log"
 postgres_listen_host="${GLO_POSTGRES_LISTEN_HOST:-127.0.0.1}"
 postgres_host_cidr="${GLO_POSTGRES_HOST_CIDR:-}"
-docker_mode=0
-docker_state_root=/var/lib/glo-postgres
+container_mode=0
+container_state_root=/var/lib/glo-postgres
 
 usage() {
     cat <<'EOF'
-Usage: glo-postgres [--docker] {run|start|stop|status|url|env}
+Usage: glo-postgres [--container] {run|start|stop|status|url|env}
 
 Manage the disposable loopback-only PostgreSQL 18 cluster included when the
-devcontainer is built with POSTGRES_ENABLED=1. Use --docker on a host without
+devcontainer is built with POSTGRES_ENABLED=1. Use --container on a host without
 PostgreSQL 18 to run the cluster from that devcontainer image.
 
 Environment:
+  GLO_CONTAINER_ENGINE           Host engine (default: Docker on macOS, Podman otherwise)
   GLO_POSTGRES_PORT              Loopback TCP port (default: 55432)
   GLO_POSTGRES_ROOT              Persistent cluster state directory
-  GLO_POSTGRES_DOCKER_IMAGE      Enabled image (default: devcontainer-WORKSPACE)
-  GLO_POSTGRES_DOCKER_CONTAINER  Docker container name override
+  GLO_POSTGRES_CONTAINER_IMAGE   Enabled image (default: devcontainer-WORKSPACE)
+  GLO_POSTGRES_CONTAINER_NAME    Container name override
 EOF
 }
 
@@ -36,8 +37,8 @@ fail() {
     exit 1
 }
 
-if [[ "${1:-}" == "--docker" ]]; then
-    docker_mode=1
+if [[ "${1:-}" == "--container" ]]; then
+    container_mode=1
     shift
 fi
 
@@ -68,7 +69,7 @@ database_url() {
 
 require_feature() {
     if [[ ! -x "${postgres_bin}/postgres" ]]; then
-        fail "PostgreSQL 18 is unavailable; rebuild with POSTGRES_ENABLED=1 or use --docker"
+        fail "PostgreSQL 18 is unavailable; rebuild with POSTGRES_ENABLED=1 or use --container"
     fi
 }
 
@@ -173,33 +174,43 @@ workspace_root() {
         fi
         candidate="$(dirname "$candidate")"
     done
-    fail "--docker must run beneath a workspace containing .git"
+    fail "--container must run beneath a workspace containing .git"
 }
 
-configure_docker() {
-    command -v docker >/dev/null 2>&1 || fail "Docker is required for --docker"
+configure_container() {
+    case "$(uname -s)" in
+        Darwin) default_container_engine="docker" ;;
+        *) default_container_engine="podman" ;;
+    esac
+    container_engine="${GLO_CONTAINER_ENGINE:-${default_container_engine}}"
+    case "$container_engine" in
+        docker|podman) ;;
+        *) fail "GLO_CONTAINER_ENGINE must be 'podman' or 'docker'" ;;
+    esac
+    command -v "$container_engine" >/dev/null 2>&1 \
+        || fail "Container engine not found: ${container_engine}"
     workspace="$(workspace_root)"
     workspace_name="$(basename "$workspace")"
-    docker_image="${GLO_POSTGRES_DOCKER_IMAGE:-devcontainer-${workspace_name}}"
-    docker_container="${GLO_POSTGRES_DOCKER_CONTAINER:-glo-postgres-${workspace_name}-${postgres_port}}"
+    container_image="${GLO_POSTGRES_CONTAINER_IMAGE:-devcontainer-${workspace_name}}"
+    container_name="${GLO_POSTGRES_CONTAINER_NAME:-glo-postgres-${workspace_name}-${postgres_port}}"
     helper_path="$(realpath "${BASH_SOURCE[0]}")"
-    [[ -n "$docker_image" ]] || fail "GLO_POSTGRES_DOCKER_IMAGE must not be empty"
-    [[ "$docker_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
-        || fail "GLO_POSTGRES_DOCKER_CONTAINER is invalid"
+    [[ -n "$container_image" ]] || fail "GLO_POSTGRES_CONTAINER_IMAGE must not be empty"
+    [[ "$container_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] \
+        || fail "GLO_POSTGRES_CONTAINER_NAME is invalid"
 }
 
-docker_container_exists() {
-    docker container inspect "$docker_container" >/dev/null 2>&1
+container_exists() {
+    "$container_engine" container inspect "$container_name" >/dev/null 2>&1
 }
 
-docker_container_is_running() {
-    [[ "$(docker container inspect --format '{{.State.Running}}' "$docker_container" 2>/dev/null)" \
+container_is_running() {
+    [[ "$("$container_engine" container inspect --format '{{.State.Running}}' "$container_name" 2>/dev/null)" \
         == "true" ]]
 }
 
-docker_postgres_is_ready() {
-    docker_container_is_running \
-        && docker exec --env "PGPASSWORD=${postgres_password}" "$docker_container" \
+container_postgres_is_ready() {
+    container_is_running \
+        && "$container_engine" exec --env "PGPASSWORD=${postgres_password}" "$container_name" \
             "${postgres_bin}/psql" \
             --host=127.0.0.1 \
             --port="$postgres_port" \
@@ -211,78 +222,78 @@ docker_postgres_is_ready() {
         | grep -qx 1
 }
 
-require_owned_docker_container() {
-    owner="$(docker container inspect \
+require_owned_container() {
+    owner="$("$container_engine" container inspect \
         --format '{{index .Config.Labels "dev.glo.postgres"}}' \
-        "$docker_container" 2>/dev/null)"
-    owner_workspace="$(docker container inspect \
+        "$container_name" 2>/dev/null)"
+    owner_workspace="$("$container_engine" container inspect \
         --format '{{index .Config.Labels "dev.glo.postgres.workspace"}}' \
-        "$docker_container" 2>/dev/null)"
+        "$container_name" 2>/dev/null)"
     [[ "$owner" == "true" && "$owner_workspace" == "$workspace" ]] \
-        || fail "Docker container ${docker_container} is not owned by this Glo workspace"
+        || fail "Container ${container_name} is not owned by this Glo workspace"
 }
 
-docker_start() {
-    docker image inspect "$docker_image" >/dev/null 2>&1 \
-        || fail "Docker image ${docker_image} is unavailable; rebuild it with POSTGRES_ENABLED=1"
+container_start() {
+    "$container_engine" image inspect "$container_image" >/dev/null 2>&1 \
+        || fail "Container image ${container_image} is unavailable; rebuild it with POSTGRES_ENABLED=1"
     mkdir -p "$postgres_root"
     chmod 700 "$postgres_root"
     mounted_root="$(cd "$postgres_root" && pwd -P)"
-    if docker_container_exists; then
-        require_owned_docker_container
-        if docker_container_is_running; then
-            docker_postgres_is_ready \
-                || fail "Dockerized PostgreSQL 18 is still starting or unhealthy"
+    if container_exists; then
+        require_owned_container
+        if container_is_running; then
+            container_postgres_is_ready \
+                || fail "Containerized PostgreSQL 18 is still starting or unhealthy"
             printf 'PostgreSQL 18 ready at %s\n' "$(database_url)"
             return
         fi
-        docker container rm "$docker_container" >/dev/null
+        "$container_engine" container rm "$container_name" >/dev/null
     fi
-    docker run \
+    "$container_engine" run \
         --detach \
-        --name "$docker_container" \
+        --name "$container_name" \
         --label dev.glo.postgres=true \
         --label "dev.glo.postgres.workspace=${workspace}" \
         --publish "127.0.0.1:${postgres_port}:${postgres_port}" \
-        --mount "type=bind,source=${mounted_root},target=${docker_state_root}" \
+        --mount "type=bind,source=${mounted_root},target=${container_state_root}" \
         --mount "type=bind,source=${helper_path},target=/usr/local/bin/glo-postgres,readonly" \
         --env "GLO_POSTGRES_PORT=${postgres_port}" \
-        --env "GLO_POSTGRES_ROOT=${docker_state_root}" \
+        --env "GLO_POSTGRES_ROOT=${container_state_root}" \
         --env GLO_POSTGRES_LISTEN_HOST=0.0.0.0 \
         --env GLO_POSTGRES_HOST_CIDR=0.0.0.0/0 \
         --user "$(id -u):$(id -g)" \
-        "$docker_image" \
+        "$container_image" \
         bash -ceu '/usr/local/bin/glo-postgres start; exec sleep infinity' >/dev/null
     for _attempt in {1..120}; do
-        if docker_postgres_is_ready; then
+        if container_postgres_is_ready; then
             printf 'PostgreSQL 18 ready at %s\n' "$(database_url)"
             return
         fi
         sleep 0.25
     done
-    docker logs "$docker_container" >&2 || true
-    docker container rm --force "$docker_container" >/dev/null 2>&1 || true
-    fail "Dockerized PostgreSQL 18 did not become ready"
+    "$container_engine" logs "$container_name" >&2 || true
+    "$container_engine" container rm --force "$container_name" >/dev/null 2>&1 || true
+    fail "Containerized PostgreSQL 18 did not become ready"
 }
 
-docker_stop() {
-    if ! docker_container_exists; then
+container_stop() {
+    if ! container_exists; then
         printf 'PostgreSQL 18 is not running\n'
         return
     fi
-    require_owned_docker_container
-    if docker_container_is_running; then
-        docker exec "$docker_container" /usr/local/bin/glo-postgres stop
+    require_owned_container
+    if container_is_running; then
+        "$container_engine" exec "$container_name" /usr/local/bin/glo-postgres stop
     fi
-    docker container rm --force "$docker_container" >/dev/null
+    "$container_engine" container rm --force "$container_name" >/dev/null
 }
 
-docker_status() {
-    if ! docker_container_exists; then
+container_status() {
+    if ! container_exists; then
         fail "PostgreSQL 18 is not running"
     fi
-    require_owned_docker_container
-    if ! docker_postgres_is_ready; then
+    require_owned_container
+    if ! container_postgres_is_ready; then
         fail "PostgreSQL 18 is not running"
     fi
     printf 'PostgreSQL 18 is running at %s\n' "$(database_url)"
@@ -290,12 +301,12 @@ docker_status() {
 
 validate_config
 
-if ((docker_mode)); then
-    configure_docker
+if ((container_mode)); then
+    configure_container
     case "$command_name" in
-        start) docker_start ;;
-        stop) docker_stop ;;
-        status) docker_status ;;
+        start) container_start ;;
+        stop) container_stop ;;
+        status) container_status ;;
         url) database_url ;;
         env) printf 'export GLO_POSTGRES_URL=%q\n' "$(database_url)" ;;
         *) usage >&2; exit 2 ;;

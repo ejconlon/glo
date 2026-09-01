@@ -5,6 +5,10 @@ glo := "__GLO__"
 default:
     @just --list
 
+# Build the workspace devcontainer image
+image:
+    just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" image
+
 shell *args:
     #!/bin/bash
     just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" shell "$@"

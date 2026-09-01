@@ -176,12 +176,19 @@ Mode flags:
 
 ```sh
 glo-build --local precommit       # plan and execute locally
-glo-build --docker precommit      # plan and execute in Docker
-glo-build --plan-local --exec-docker precommit
-glo-build --plan-docker --exec-local precommit
+glo-build --container precommit      # plan and execute in a container
+glo-build --plan-local --exec-container precommit
+glo-build --plan-container --exec-local precommit
 ```
 
-Inside a container, docker mode is forced back to local mode.
+`GLO_CONTAINER_ENGINE` selects `podman` or `docker` for containerized
+operations. The platform default is Docker on macOS and Podman on other
+supported hosts. Inside a container, containerized mode is forced back to local
+mode. Container builds run as the image's `user` account by default; set
+`GLO_CONTAINER_USER` for a compatible custom image that uses a different
+account name. A workspace-specific volume stores container-created project
+environments under `.glo/venv`, preventing host interpreter paths from leaking
+into container builds.
 
 Build state locations:
 
@@ -283,11 +290,18 @@ The SQLite index at `base/.zk/notebook.db` is generated and gitignored.
 Bootstrapped workspaces get a small `justfile`:
 
 ```sh
+just image                       # build the workspace devcontainer image
 just shell                       # start an interactive devcontainer shell
 just precommit                   # run build precommit and notes precommit
 ```
 
-`just shell` delegates to glo's `devcontainer/justfile` and passes the workspace path explicitly. Nested `just` calls preserve it through `GLO_WORKSPACE`.
+`just shell` delegates to glo's `devcontainer/justfile` and passes the workspace
+path explicitly. Nested `just` calls preserve it through `GLO_WORKSPACE`.
+Host lifecycle and image recipes default to Docker on macOS and Podman on other
+supported hosts. Set `GLO_CONTAINER_ENGINE` explicitly to override that choice.
+The Dev Container CLI receives the selected executable through `--docker-path`.
+Podman selects the CLI's non-BuildKit path so rootless builds use Podman's
+native builder.
 
 ## Local Host Tooling
 
@@ -331,18 +345,18 @@ same cluster and then owns PostgreSQL in the foreground for container use. No
 cluster is initialized or started merely by enabling the image feature.
 
 On a host without PostgreSQL 18, the same enabled devcontainer image can own a
-dedicated Docker cluster while exposing only the host loopback port:
+dedicated container while exposing only the host loopback port:
 
 ```sh
-GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --docker start
-eval "$(GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --docker env)"
-glo-postgres --docker stop
+GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --container start
+eval "$(GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --container env)"
+glo-postgres --container stop
 ```
 
-Docker mode bind-mounts the absolute `GLO_POSTGRES_ROOT` into the container, so
-cluster files survive container removal. It defaults to the image
-`devcontainer-WORKSPACE`; `GLO_POSTGRES_DOCKER_IMAGE` and
-`GLO_POSTGRES_DOCKER_CONTAINER` select explicit alternatives.
+Container mode bind-mounts the absolute `GLO_POSTGRES_ROOT`, so cluster files
+survive container removal. It defaults to the image
+`devcontainer-WORKSPACE`; `GLO_POSTGRES_CONTAINER_IMAGE` and
+`GLO_POSTGRES_CONTAINER_NAME` select explicit alternatives.
 
 ### Optional Garage object store
 

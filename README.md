@@ -8,7 +8,14 @@ From the root of your git workspace:
 
 1. `git submodule add https://github.com/ejconlon/glo.git submodules/glo`
 2. `./submodules/glo/bootstrap.sh`
-3. `just shell`
+3. `just image`
+4. `just shell`
+
+Host container commands default to Docker on macOS and Podman on other
+supported hosts. Set `GLO_CONTAINER_ENGINE` to `docker` or `podman` to override
+the platform default. The same selection is passed to the Dev Container CLI
+and all direct lifecycle commands; Podman builds use its native builder instead
+of Docker Buildx.
 
 `bootstrap.sh` creates the devcontainer config, `bin/glo*` wrappers, `base/`, `.glo/build`, and a workspace `justfile`.
 
@@ -45,12 +52,13 @@ Glo. Use `glo postgres status`, `url`, and `stop` for the remaining lifecycle.
 The fixed `glo:glo` credential and `glo_test` database are strictly for local,
 loopback-only testing.
 
-From the host, `bin/glo-postgres --docker start` runs the same helper from an
-enabled `devcontainer-WORKSPACE` image and publishes only the loopback port.
+From the host, `bin/glo-postgres --container start` runs the same helper from an
+enabled `devcontainer-WORKSPACE` image through the selected engine and
+publishes only the loopback port.
 Set `GLO_POSTGRES_ROOT` to an absolute host directory such as
-`$PWD/temp/run/postgres`; Docker bind-mounts it so cluster files survive the
-container's removal. Image and container names can be overridden with
-`GLO_POSTGRES_DOCKER_IMAGE` and `GLO_POSTGRES_DOCKER_CONTAINER`.
+`$PWD/temp/run/postgres`; the engine bind-mounts it so cluster files survive
+the container's removal. Image and container names can be overridden with
+`GLO_POSTGRES_CONTAINER_IMAGE` and `GLO_POSTGRES_CONTAINER_NAME`.
 
 ## Optional Caddy
 

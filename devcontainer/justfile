@@ -3,26 +3,38 @@ set positional-arguments
 workspace := env_var_or_default("GLO_WORKSPACE", parent_directory(justfile_directory()))
 export GLO_WORKSPACE := workspace
 project := file_name(workspace)
+default_container_engine := if os() == "macos" { "docker" } else { "podman" }
+container_engine := env_var_or_default("GLO_CONTAINER_ENGINE", default_container_engine)
+container_buildkit := if container_engine == "podman" {
+  "never"
+} else if container_engine == "docker" {
+  "auto"
+} else {
+  error("GLO_CONTAINER_ENGINE must be 'podman' or 'docker'")
+}
 
 # Build the devcontainer image
-build:
-  devcontainer build --label devcontainer.project={{project}} --image-name devcontainer-{{project}} --workspace-folder {{workspace}}
+image:
+  devcontainer build --docker-path {{container_engine}} --buildkit {{container_buildkit}} --label devcontainer.project={{project}} --image-name devcontainer-{{project}} --workspace-folder {{workspace}}
+
+# Compatibility alias for the devcontainer image
+build: image
 
 # Start the devcontainer (run in background)
 up name uniq:
-  devcontainer up --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}}
+  devcontainer up --docker-path {{container_engine}} --buildkit {{container_buildkit}} --id-label devcontainer.project={{project}} --id-label devcontainer.name={{name}} --id-label devcontainer.uniq={{uniq}} --workspace-folder {{workspace}}
 
 # Remove the devcontainer
 down uniq:
-  docker rm -f $(docker ps -aq --filter label=devcontainer.project={{project}} --filter label=devcontainer.uniq={{uniq}}) 2>/dev/null || true
+  {{container_engine}} rm -f $({{container_engine}} ps -aq --filter label=devcontainer.project={{project}} --filter label=devcontainer.uniq={{uniq}}) 2>/dev/null || true
 
 # Show all running devcontainers for this project
 ps:
-  docker ps --filter label=devcontainer.project={{project}} --format 'table {{{{.ID}}\t{{{{.Names}}\t{{{{.Label "devcontainer.name"}}\t{{{{.Label "devcontainer.uniq"}}\t{{{{.Command}}'
+  {{container_engine}} ps --filter label=devcontainer.project={{project}} --format 'table {{{{.ID}}\t{{{{.Names}}\t{{{{.Label "devcontainer.name"}}\t{{{{.Label "devcontainer.uniq"}}\t{{{{.Command}}'
 
 # Stop all devcontainers for this project
 down-all:
-  docker rm -f $(docker ps -aq --filter label=devcontainer.project={{project}}) 2>/dev/null || true
+  {{container_engine}} rm -f $({{container_engine}} ps -aq --filter label=devcontainer.project={{project}}) 2>/dev/null || true
 
 # Run a command in the devcontainer
 exec name uniq *args:
@@ -30,7 +42,7 @@ exec name uniq *args:
   name="$1"
   uniq="$2"
   shift 2
-  devcontainer exec --id-label devcontainer.project={{project}} --id-label devcontainer.name="$name" --id-label devcontainer.uniq="$uniq" --workspace-folder {{workspace}} --remote-env AGENT_NAME="$name-$uniq" "$@"
+  devcontainer exec --docker-path {{container_engine}} --id-label devcontainer.project={{project}} --id-label devcontainer.name="$name" --id-label devcontainer.uniq="$uniq" --workspace-folder {{workspace}} --remote-env AGENT_NAME="$name-$uniq" "$@"
 
 # Run command lifecycle
 lifecycle name *args:

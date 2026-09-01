@@ -1,4 +1,4 @@
-FROM rockylinux/rockylinux:10.2-minimal
+FROM docker.io/rockylinux/rockylinux:10.2-minimal
 
 USER root
 WORKDIR /root

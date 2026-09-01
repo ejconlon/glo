@@ -21,6 +21,10 @@ git config user.name "glo test"
 export PATH="$WORKSPACE/bin:$PATH"
 
 # --- Optional tooling ---
+step "Container tooling"
+"${GLO_DIR}/test/container-tooling.sh"
+ok "Container tooling"
+
 step "SecretSpec tooling"
 "${GLO_DIR}/test/secretspec-tooling.sh"
 ok "SecretSpec tooling"

@@ -141,4 +141,4 @@ add_to_gitignore() {
 add_to_gitignore "/.glo"
 add_to_gitignore "/base/.zk/notebook.db"
 
-echo "[I] Done. To build: just -f ${SCRIPT_DIR}/devcontainer/justfile build"
+echo "[I] Done. To build: just image"

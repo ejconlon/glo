@@ -65,17 +65,23 @@ _ensure_cargo_on_path() {
 }
 _ensure_cargo_on_path
 
-# Default execution mode: "local" or "docker"
-# Change this to "docker" to run builds in containers by default
+# Default execution mode: "local" or "container".
+# Change this to "container" to run builds in containers by default.
 DEFAULT_MODE="local"
 
-# Docker configuration
+# Container configuration. GLO_CONTAINER_ENGINE selects the compatible host
+# executable used by the containerized modes.
+case "$(uname -s)" in
+    Darwin) DEFAULT_CONTAINER_ENGINE="docker" ;;
+    *) DEFAULT_CONTAINER_ENGINE="podman" ;;
+esac
+CONTAINER_ENGINE="${GLO_CONTAINER_ENGINE:-${DEFAULT_CONTAINER_ENGINE}}"
 DEV_IMAGE="${DEV_IMAGE:-glo_dev}"
-CONTAINER_USER="glo"
+CONTAINER_USER="${GLO_CONTAINER_USER:-user}"
 CONTAINER_HOME="/home/${CONTAINER_USER}"
 CONTAINER_WORKDIR="${CONTAINER_HOME}/workspace"
-# HOST_WORKDIR is the path on the docker host that maps to SCRIPT_DIR
-# Required for docker-in-docker scenarios
+# HOST_WORKDIR is the host path that maps to SCRIPT_DIR.
+# It is required for nested container scenarios.
 HOST_WORKDIR="${HOST_WORKDIR:-${WORKSPACE_DIR}}"
 
 # Detect if we're already inside a container
@@ -103,60 +109,60 @@ while (($# > 0)); do
     case "$1" in
         --local)
             if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "local" ]]; then
-                echo "[E] Conflicting flags: --local cannot be combined with --plan-docker" >&2
+                echo "[E] Conflicting flags: --local cannot be combined with --plan-container" >&2
                 exit 1
             fi
             if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "local" ]]; then
-                echo "[E] Conflicting flags: --local cannot be combined with --exec-docker" >&2
+                echo "[E] Conflicting flags: --local cannot be combined with --exec-container" >&2
                 exit 1
             fi
             PLAN_MODE="local"
             EXEC_MODE="local"
             shift
             ;;
-        --docker)
-            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "docker" ]]; then
-                echo "[E] Conflicting flags: --docker cannot be combined with --plan-local" >&2
+        --container)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "container" ]]; then
+                echo "[E] Conflicting flags: --container cannot be combined with --plan-local" >&2
                 exit 1
             fi
-            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "docker" ]]; then
-                echo "[E] Conflicting flags: --docker cannot be combined with --exec-local" >&2
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "container" ]]; then
+                echo "[E] Conflicting flags: --container cannot be combined with --exec-local" >&2
                 exit 1
             fi
-            PLAN_MODE="docker"
-            EXEC_MODE="docker"
+            PLAN_MODE="container"
+            EXEC_MODE="container"
             shift
             ;;
         --plan-local)
             if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "local" ]]; then
-                echo "[E] Conflicting flags: --plan-local cannot be combined with --plan-docker or --docker" >&2
+                echo "[E] Conflicting flags: --plan-local cannot be combined with --plan-container or --container" >&2
                 exit 1
             fi
             PLAN_MODE="local"
             shift
             ;;
-        --plan-docker)
-            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "docker" ]]; then
-                echo "[E] Conflicting flags: --plan-docker cannot be combined with --plan-local or --local" >&2
+        --plan-container)
+            if [[ -n "$PLAN_MODE" && "$PLAN_MODE" != "container" ]]; then
+                echo "[E] Conflicting flags: --plan-container cannot be combined with --plan-local or --local" >&2
                 exit 1
             fi
-            PLAN_MODE="docker"
+            PLAN_MODE="container"
             shift
             ;;
         --exec-local)
             if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "local" ]]; then
-                echo "[E] Conflicting flags: --exec-local cannot be combined with --exec-docker or --docker" >&2
+                echo "[E] Conflicting flags: --exec-local cannot be combined with --exec-container or --container" >&2
                 exit 1
             fi
             EXEC_MODE="local"
             shift
             ;;
-        --exec-docker)
-            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "docker" ]]; then
-                echo "[E] Conflicting flags: --exec-docker cannot be combined with --exec-local or --local" >&2
+        --exec-container)
+            if [[ -n "$EXEC_MODE" && "$EXEC_MODE" != "container" ]]; then
+                echo "[E] Conflicting flags: --exec-container cannot be combined with --exec-local or --local" >&2
                 exit 1
             fi
-            EXEC_MODE="docker"
+            EXEC_MODE="container"
             shift
             ;;
         *)
@@ -172,14 +178,26 @@ EXEC_MODE="${EXEC_MODE:-${DEFAULT_MODE}}"
 
 # Force local mode when inside a container
 if [[ "$IN_CONTAINER" == "true" ]]; then
-    if [[ "$PLAN_MODE" == "docker" || "$EXEC_MODE" == "docker" ]]; then
+    if [[ "$PLAN_MODE" == "container" || "$EXEC_MODE" == "container" ]]; then
         echo "[I] Already inside container, using local mode" >&2
         PLAN_MODE="local"
         EXEC_MODE="local"
     fi
 fi
 
-# Compute volume name hash (matches devrun.sh)
+if [[ "$PLAN_MODE" == "container" || "$EXEC_MODE" == "container" ]]; then
+    case "$CONTAINER_ENGINE" in
+        docker|podman) ;;
+        *)
+            echo "[E] GLO_CONTAINER_ENGINE must be 'podman' or 'docker'" >&2
+            exit 1
+            ;;
+    esac
+    command -v "$CONTAINER_ENGINE" >/dev/null 2>&1 \
+        || { echo "[E] Container engine not found: $CONTAINER_ENGINE" >&2; exit 1; }
+fi
+
+# Compute a stable volume name for container-only project environments.
 WORKDIR_HASH="$(printf '%s' "${HOST_WORKDIR}" | sha256sum | cut -c1-12)"
 VENV_VOLUME="glo-venvs-${WORKDIR_HASH}"
 
@@ -191,8 +209,8 @@ elif [[ -z "${HOST_TZ}" && -L /etc/localtime ]]; then
     HOST_TZ="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')"
 fi
 
-# Build common docker arguments for volume mounts
-build_docker_args() {
+# Build common container arguments for volume mounts.
+build_container_args() {
     local -n args_ref="$1"
 
     # Workspace mount
@@ -204,12 +222,13 @@ build_docker_args() {
         args_ref+=(-v "${WORKSPACE_DIR}/.glo/cache:${CONTAINER_WORKDIR}/.glo/cache")
     fi
 
-    # Venv volume (shared with devrun.sh)
-    args_ref+=(-v "${VENV_VOLUME}:${CONTAINER_WORKDIR}/.venv")
+    # Keep container-created project environments separate from host-created
+    # environments, whose interpreter paths may resolve to another Python.
+    args_ref+=(-v "${VENV_VOLUME}:${CONTAINER_WORKDIR}/.glo/venv")
 
-    # Cache directories inside .venv to enable hardlinks
-    args_ref+=(-e "UV_CACHE_DIR=${CONTAINER_WORKDIR}/.venv/cache/uv")
-    args_ref+=(-e "PIP_CACHE_DIR=${CONTAINER_WORKDIR}/.venv/cache/pip")
+    # Put package caches on the same volume to enable hardlinks.
+    args_ref+=(-e "UV_CACHE_DIR=${CONTAINER_WORKDIR}/.glo/venv/cache/uv")
+    args_ref+=(-e "PIP_CACHE_DIR=${CONTAINER_WORKDIR}/.glo/venv/cache/pip")
 
     # Standard environment
     args_ref+=(-e "HOME=${CONTAINER_HOME}")
@@ -235,12 +254,12 @@ if [[ "$PLAN_MODE" == "local" ]]; then
     WORKSPACE="$WORKSPACE_DIR" "$PYTHON" -m glo_build.cli --plan-path "$PLAN_PATH" "$@"
     exit_code=$?
 else
-    # Run planning in docker
-    docker_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
-    build_docker_args docker_args
-    docker_args+=(-e "CONTAINER_WORKDIR=${CONTAINER_WORKDIR}" -e "PLAN_NAME=${PLAN_NAME}")
+    # Run planning in the selected container engine.
+    container_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
+    build_container_args container_args
+    container_args+=(-e "CONTAINER_WORKDIR=${CONTAINER_WORKDIR}" -e "PLAN_NAME=${PLAN_NAME}")
 
-    docker run "${docker_args[@]}" "${DEV_IMAGE}" \
+    "$CONTAINER_ENGINE" run "${container_args[@]}" "${DEV_IMAGE}" \
         bash -c '
             if [[ -x "${CONTAINER_WORKDIR}/.glo/build/bin/python3" ]]; then
                 VENV_DIR="${CONTAINER_WORKDIR}/.glo/build"
@@ -269,12 +288,12 @@ if [[ -s "$PLAN_PATH" ]]; then
         bash "$PLAN_PATH"
         exit_code=$?
     else
-        # Execute plan in docker
-        docker_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
-        build_docker_args docker_args
+        # Execute the plan in the selected container engine.
+        container_args=("--rm" "-u" "${CONTAINER_USER}" "-w" "${CONTAINER_WORKDIR}")
+        build_container_args container_args
 
-        docker_args+=(-e "WORKSPACE=${CONTAINER_WORKDIR}")
-        docker run "${docker_args[@]}" "${DEV_IMAGE}" \
+        container_args+=(-e "WORKSPACE=${CONTAINER_WORKDIR}")
+        "$CONTAINER_ENGINE" run "${container_args[@]}" "${DEV_IMAGE}" \
             bash "${CONTAINER_WORKDIR}/.glo/cache/${PLAN_NAME}"
         exit_code=$?
     fi
