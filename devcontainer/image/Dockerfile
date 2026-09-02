@@ -67,7 +67,9 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         zstd \
         gmp-devel \
         libffi-devel \
-        zlib-devel
+        zlib-devel \
+    && groupadd --gid 1000 user \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user
 
 # Build Caddy with the pinned Layer 4 module using a temporary Go toolchain.
 # The default image contains no Caddy executable.
@@ -191,8 +193,6 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
     /usr/pgsql-18/bin/psql --version | grep -E '^psql \(PostgreSQL\) 18\.'; \
     fi
 
-RUN groupadd --gid 1000 user \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user
 ENV PATH="/usr/pgsql-18/bin:${PATH}"
 
 # Upgrade pip and install uv
@@ -566,26 +566,11 @@ RUN if [ "${OPENCODE_ENABLED}" = "1" ]; then \
     fi
 
 # Install glo
-RUN mkdir -p /opt/glo/bin /opt/glo/lib
-COPY files/glo/README.md /opt/glo/README.md
-COPY --chmod=0755 files/glo/bin/glo /opt/glo/bin/glo
-COPY --chmod=0755 files/glo/bin/glo-agent /opt/glo/bin/glo-agent
-COPY --chmod=0755 files/glo/bin/glo-gen /opt/glo/bin/glo-gen
-COPY --chmod=0755 files/glo/bin/glo-local /opt/glo/bin/glo-local
-COPY --chmod=0755 files/glo/bin/glo-notes /opt/glo/bin/glo-notes
-COPY --chmod=0755 files/glo/bin/glo-issue /opt/glo/bin/glo-issue
-COPY --chmod=0755 files/glo/bin/glo-build /opt/glo/bin/glo-build
-COPY --chmod=0755 files/glo/bin/glo-caddy /opt/glo/bin/glo-caddy
-COPY --chmod=0755 files/glo/bin/glo-garage /opt/glo/bin/glo-garage
-COPY --chmod=0755 files/glo/bin/glo-secrets /opt/glo/bin/glo-secrets
-COPY --chmod=0755 files/glo/bin/glo-postgres /opt/glo/bin/glo-postgres
-COPY files/glo/lib/ /opt/glo/lib/
-COPY files/glo/templates/ /opt/glo/templates/
-COPY files/glo/base-scaffold/ /opt/glo/base-scaffold/
+COPY files/glo/ /opt/glo/
 RUN UV_PYTHON_INSTALL_DIR=/opt/glo/python \
     UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
-    uv sync --project /opt/glo/lib/build --package glo_build --frozen
-RUN chown -R user:user /opt/glo
+    uv sync --project /opt/glo/lib/build --package glo_build --frozen \
+    && chown -R user:user /opt/glo
 
 USER user
 WORKDIR /home/user

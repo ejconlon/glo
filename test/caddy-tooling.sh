@@ -32,7 +32,8 @@ grep -Fq 'github.com/mholt/caddy-l4@${CADDY_L4_COMMIT}' "$DOCKERFILE"
 grep -Fq 'github.com/mholt/caddy-l4=/tmp/caddy-build/source/caddy-l4' "$DOCKERFILE"
 ! grep -Eq 'go install .*github\.com/' "$DOCKERFILE"
 grep -Fq 'caddy list-modules | grep -Fx layer4.handlers.tls' "$DOCKERFILE"
-grep -Fq 'files/glo/bin/glo-caddy /opt/glo/bin/glo-caddy' "$DOCKERFILE"
+grep -Fxq 'COPY files/glo/ /opt/glo/' "$DOCKERFILE"
+[[ -x "$GLO_CADDY" ]]
 grep -Fq '"CADDY_ENABLED": "0"' "$TEMPLATE"
 # shellcheck disable=SC2016  # Assert the dispatcher retains runtime expansion.
 grep -Fq 'caddy)     shift; exec "${_GLO_BIN_DIR}/glo-caddy"' "$GLO"

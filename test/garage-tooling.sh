@@ -14,7 +14,8 @@ grep -Fq 'ARG GARAGE_VERSION=2.3.0' "$DOCKERFILE"
 grep -Fq 'GARAGE_SHA256_X64=' "$DOCKERFILE"
 grep -Fq 'GARAGE_SHA256_ARM64=' "$DOCKERFILE"
 grep -Fq 'garagehq.deuxfleurs.fr/_releases/' "$DOCKERFILE"
-grep -Fq 'files/glo/bin/glo-garage /opt/glo/bin/glo-garage' "$DOCKERFILE"
+grep -Fxq 'COPY files/glo/ /opt/glo/' "$DOCKERFILE"
+[[ -x "$GLO_GARAGE" ]]
 grep -Fq '"GARAGE_ENABLED": "0"' "$TEMPLATE"
 # shellcheck disable=SC2016  # Assert the dispatcher retains runtime expansion.
 grep -Fq 'garage)    shift; exec "${_GLO_BIN_DIR}/glo-garage"' "$GLO"

@@ -6,6 +6,8 @@ DEVCONTAINER_JUSTFILE="$GLO_DIR/devcontainer/justfile"
 GLO_BUILD="$GLO_DIR/devcontainer/image/files/glo/bin/glo-build"
 GLO_POSTGRES="$GLO_DIR/devcontainer/image/files/glo/bin/glo-postgres"
 WORKSPACE_JUSTFILE="$GLO_DIR/template/justfile"
+DOCKERFILE="$GLO_DIR/devcontainer/image/Dockerfile"
+DOCKERIGNORE="$GLO_DIR/devcontainer/image/.dockerignore"
 TEST_ROOT="$(mktemp -d /tmp/glo-container-tooling.XXXXXX)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -74,7 +76,32 @@ grep -Fq "GLO_CONTAINER_ENGINE must be 'podman' or 'docker'" \
     "$TEST_ROOT/postgres-invalid.out"
 
 grep -Fq 'FROM docker.io/rockylinux/rockylinux:10.2-minimal' \
-    "$GLO_DIR/devcontainer/image/Dockerfile"
+    "$DOCKERFILE"
+grep -Fxq 'COPY files/glo/ /opt/glo/' "$DOCKERFILE"
+[[ "$(grep -Ec '^COPY .*files/glo' "$DOCKERFILE")" -eq 1 ]] \
+    || fail "Glo image resources are split across multiple COPY layers"
+if grep -Eq '^RUN (mkdir -p /opt/glo|chown -R user:user /opt/glo)' "$DOCKERFILE"; then
+    fail "Glo image retains a standalone directory or ownership layer"
+fi
+grep -Fq '    && groupadd --gid 1000 user \' "$DOCKERFILE"
+grep -Fq '    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user' \
+    "$DOCKERFILE"
+if grep -Fq 'RUN groupadd --gid 1000 user' "$DOCKERFILE"; then
+    fail "Image user creation remains in a standalone layer"
+fi
+for ignored_artifact in \
+    '**/.venv' \
+    '**/.pytest_cache' \
+    '**/.ruff_cache' \
+    '**/__pycache__' \
+    '**/*.py[cod]'
+do
+    grep -Fxq "$ignored_artifact" "$DOCKERIGNORE" \
+        || fail "Image context does not ignore: $ignored_artifact"
+done
+while IFS= read -r command_path; do
+    [[ -x "$command_path" ]] || fail "Glo command is not executable: $command_path"
+done < <(find "$GLO_DIR/devcontainer/image/files/glo/bin" -maxdepth 1 -type f -print)
 # shellcheck disable=SC2016  # Assert the template retains runtime expansion.
 grep -Fq 'just -f {{glo}}/devcontainer/justfile --set workspace "$PWD" image' \
     "$WORKSPACE_JUSTFILE"
