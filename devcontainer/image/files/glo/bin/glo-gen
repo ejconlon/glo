@@ -71,4 +71,21 @@ if [[ ! -d "$TEMPLATE" ]]; then
     exit 1
 fi
 
-exec "$COOKIECUTTER" "$TEMPLATE" --output-dir "${WORKSPACE_DIR}/lib" --no-input "name=${SUBPROJECT_NAME}"
+COOKIECUTTER_CACHE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/glo-gen-cookiecutter.XXXXXXXX")"
+cleanup() {
+    rm -rf -- "$COOKIECUTTER_CACHE_DIR"
+}
+trap cleanup EXIT
+
+mkdir -p "${COOKIECUTTER_CACHE_DIR}/templates" "${COOKIECUTTER_CACHE_DIR}/replay"
+COOKIECUTTER_CONFIG_FILE="${COOKIECUTTER_CACHE_DIR}/config.yaml"
+{
+    printf 'cookiecutters_dir: %s\n' "${COOKIECUTTER_CACHE_DIR}/templates"
+    printf 'replay_dir: %s\n' "${COOKIECUTTER_CACHE_DIR}/replay"
+} > "$COOKIECUTTER_CONFIG_FILE"
+
+"$COOKIECUTTER" "$TEMPLATE" \
+    --config-file "$COOKIECUTTER_CONFIG_FILE" \
+    --output-dir "${WORKSPACE_DIR}/lib" \
+    --no-input \
+    "name=${SUBPROJECT_NAME}"

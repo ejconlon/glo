@@ -56,6 +56,7 @@ bin/glo-postgres --help | grep -q 'POSTGRES_ENABLED=1' \
 
 # --- Generate projects ---
 step "Generate projects"
+"${GLO_DIR}/test/glo-gen.sh"
 bin/glo-gen meta test_meta
 bin/glo-gen rs   test_rs
 bin/glo-gen hs   test_hs
