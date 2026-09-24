@@ -490,24 +490,15 @@ def filter_projects(
     return filtered
 
 
-def get_path_dependencies(workspace_root: Path, project: str) -> list[str]:
+def get_path_dependencies(
+    workspace_root: Path, project: str, package_to_project: dict[str, str]
+) -> list[str]:
     """Get path dependencies for a project from [tool.uv.sources]."""
     # Project paths are like "/lib/core", strip leading "/" for filesystem access
     rel_path = project.lstrip("/")
     pyproject_path = workspace_root / rel_path / "pyproject.toml"
     if not pyproject_path.exists():
         return []
-
-    # Build package name to project path mapping
-    package_to_project: dict[str, str] = {}
-    lib_dir = workspace_root / "lib"
-    if lib_dir.exists():
-        for build_json in lib_dir.rglob("build.json"):
-            project_dir = build_json.parent
-            pkg_name = get_project_package_name(project_dir)
-            if pkg_name:
-                rel_path = str(project_dir.relative_to(lib_dir))
-                package_to_project[pkg_name] = f"/lib/{rel_path}"
 
     content = pyproject_path.read_text()
     in_sources = False
@@ -531,6 +522,21 @@ def get_path_dependencies(workspace_root: Path, project: str) -> list[str]:
     return deps
 
 
+def get_package_to_project(workspace_root: Path, projects: list[str]) -> dict[str, str]:
+    """Map package names to already discovered build projects."""
+    package_to_project: dict[str, str] = {}
+    for project in projects:
+        package_name = get_project_package_name(workspace_root / project.lstrip("/"))
+        if package_name:
+            package_to_project[package_name] = project
+    return package_to_project
+
+
+def find_project_manifests(lib_dir: Path) -> list[Path]:
+    """Find manifests at the supported one- and two-level project paths."""
+    return sorted((*lib_dir.glob("*/build.json"), *lib_dir.glob("*/*/build.json")))
+
+
 def discover_projects(workspace_root: Path) -> list[str]:
     """Discover workspace projects in dependency order (topological sort)."""
     # Discover projects from lib/ directory by finding build.json files
@@ -538,7 +544,7 @@ def discover_projects(workspace_root: Path) -> list[str]:
     projects: list[str] = []
 
     if lib_dir.exists():
-        for build_json in sorted(lib_dir.rglob("build.json")):
+        for build_json in find_project_manifests(lib_dir):
             # Get path relative to lib/, e.g., "core" or "comm/gen"
             rel_path = build_json.parent.relative_to(lib_dir)
             projects.append(f"/lib/{rel_path}")
@@ -550,8 +556,9 @@ def discover_projects(workspace_root: Path) -> list[str]:
     indegree: dict[str, int] = {p: 0 for p in projects}
     dependents: dict[str, list[str]] = {p: [] for p in projects}
 
+    package_to_project = get_package_to_project(workspace_root, projects)
     for project in projects:
-        deps = get_path_dependencies(workspace_root, project)
+        deps = get_path_dependencies(workspace_root, project, package_to_project)
         for dep in deps:
             if dep in indegree:
                 indegree[project] += 1
@@ -3446,9 +3453,10 @@ def get_all_project_deps(
             rel_path = proj[5:]  # Remove "/lib/"
             relpath_to_project[rel_path] = proj
 
+    package_to_project = get_package_to_project(workspace_root, projects)
     deps: dict[str, list[str]] = {}
     for proj in projects:
-        proj_deps = get_path_dependencies(workspace_root, proj)
+        proj_deps = get_path_dependencies(workspace_root, proj, package_to_project)
 
         # Add extra_deps from build.json
         project = Project(proj)
@@ -3649,6 +3657,17 @@ def parse_cli_arguments(
     return parsed, arguments
 
 
+def is_exact_project_path(workspace_root: Path, pattern: str) -> bool:
+    """Recognize a supported project path with its own build manifest."""
+    parts = pattern.split("/")
+    return (
+        pattern.startswith("/lib/")
+        and len(parts) in (3, 4)
+        and all(part not in ("", ".", "..") for part in parts[2:])
+        and (workspace_root / pattern.lstrip("/") / "build.json").is_file()
+    )
+
+
 def main(workspace_root: Path | None = None) -> int:
     """Main entry point.
 
@@ -3667,34 +3686,7 @@ def main(workspace_root: Path | None = None) -> int:
 
     ws_root = get_workspace_root()
 
-    # Early handling of context-sensitive help before argparse
-    # This catches: /project --help, /project target --help
-    all_projects = discover_projects(ws_root)
     argv = sys.argv[1:]
-
-    build_argv = argv[: argv.index("--")] if "--" in argv else argv
-    if ("--help" in build_argv or "-h" in build_argv) and any(
-        a.startswith("/") for a in build_argv
-    ):
-        args_no_help = [a for a in build_argv if a not in ("--help", "-h")]
-        # Find first project pattern
-        project_args = [a for a in args_no_help if a.startswith("/")]
-        if project_args:
-            project_pattern = project_args[0]
-            matches = expand_project_pattern(project_pattern, all_projects)
-            if matches and len(matches) == 1:
-                project_path = matches[0]
-                # Get non-project, non-flag args after the project
-                idx = args_no_help.index(project_pattern)
-                remaining = [
-                    a for a in args_no_help[idx + 1 :] if not a.startswith("-")
-                ]
-                if remaining:
-                    show_target_help(project_path, remaining[0])
-                else:
-                    show_project_help(project_path)
-                return 0
-
     cli = cli_invocation()
     parser = argparse.ArgumentParser(
         description="Lightweight build system for glo",
@@ -3764,7 +3756,43 @@ Examples:
         help="[command [args...]] [project...] [command [args...]]...",
     )
 
+    # Parse context-sensitive help without letting argparse consume --help.
+    build_argv = argv[: argv.index("--")] if "--" in argv else argv
+    if "--help" in build_argv or "-h" in build_argv:
+        help_argv = [a for a in build_argv if a not in ("--help", "-h")]
+        _, help_args = parse_cli_arguments(parser, help_argv)
+        project_args = [a for a in help_args if a.startswith("/")]
+        if project_args:
+            project_pattern = project_args[0]
+            all_projects = (
+                [project_pattern]
+                if is_exact_project_path(ws_root, project_pattern)
+                else discover_projects(ws_root)
+            )
+            matches = expand_project_pattern(project_pattern, all_projects)
+            if matches and len(matches) == 1:
+                project_path = matches[0]
+                remaining = help_args[help_args.index(project_pattern) + 1 :]
+                target_names = [arg for arg in remaining if not arg.startswith("-")]
+                if target_names:
+                    show_target_help(project_path, target_names[0])
+                else:
+                    show_project_help(project_path)
+                return 0
+
     parsed, all_args = parse_cli_arguments(parser, argv)
+
+    # An exact project path needs no workspace discovery or dependency sort.
+    # Keep the full catalog for pattern, multi-project, and git-filtered runs.
+    exact_project = all_args[0] if all_args else ""
+    if (
+        parsed.filter == "none"
+        and is_exact_project_path(ws_root, exact_project)
+        and not any(arg.startswith(("/", "^/")) for arg in all_args[1:])
+    ):
+        all_projects = [exact_project]
+    else:
+        all_projects = discover_projects(ws_root)
 
     # Handle no-args case: show general help
     if not all_args:
