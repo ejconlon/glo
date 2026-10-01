@@ -477,9 +477,9 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
 
 # Install SMT solver tooling from GitHub releases.
 ARG SMT_ENABLED=0
-ARG Z3_VERSION=5.0.0
-ARG Z3_SHA256_X64=d4922cebc9f0a55629231ec0c62f0bbedf8006eddaed4e68199ad19626b697f6
-ARG Z3_SHA256_ARM64=c9437ff7e419e715db76d20e4b2142bf60a206c8e1d2b380c0ce35dc8d07b1f4
+ARG Z3_VERSION=5.1.0
+ARG Z3_SHA256_X64=f47be8d27d3230e823bf1eeede2fe0abaca55bb78d0b59974370e6689a92284a
+ARG Z3_SHA256_ARM64=2832cfd43c6862fbaf78834b5f1e35d031b4a87e85456b696c1c6f609cd5609e
 RUN if [ "${SMT_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
