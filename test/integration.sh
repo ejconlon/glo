@@ -13,11 +13,9 @@ ok()   { echo "[OK] $*"; }
 # --- Setup ---
 step "Setup"
 rm -rf "$WORKSPACE"
-mkdir -p "$WORKSPACE"
+mkdir -p "$WORKSPACE/.git"
 cd "$WORKSPACE"
-git init -q
-git config user.email "test@glo"
-git config user.name "glo test"
+# Workspace discovery only needs the marker; these tests perform no Git operations.
 export PATH="$WORKSPACE/bin:$PATH"
 
 # --- Optional tooling ---
