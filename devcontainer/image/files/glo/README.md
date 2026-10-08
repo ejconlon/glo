@@ -166,6 +166,13 @@ glo-build /py ^/lib/core test     # exclude a project
 glo-build precommit ^test         # precommit without test subtargets
 ```
 
+Haskell formatting uses Fourmolu for `src/`, `test/`, and `app/`. Glo selects
+`fourmolu.yaml` next to the project's `build.json` first, then falls back to
+`config/hs/fourmolu.yaml` in the workspace. It passes the selected file explicitly;
+if neither exists, it passes no config argument. Point editor integrations at
+the same file to share these settings.
+A missing formatter fails the format target; install it with `glo-local hs`.
+
 Targets declared in a project's `build.json` are project-local: invoke them
 with an explicit selector such as `glo-build /lib/foo serve`. Their names do
 not become workspace-wide commands and cannot consume arguments to another
@@ -313,7 +320,7 @@ glo-local --dry-run all           # print install commands without running them
 glo-local base                    # common CLI tools
 glo-local py                      # Python and uv
 glo-local rs                      # Rust 1.97.1 + rustfmt/clippy/rust-analyzer/rust-src
-glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, ormolu, hlint via ghcup
+glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, fourmolu, hlint via ghcup
 glo-local wasm                    # wasm32-wasi GHC, wasm32-wasi-cabal, wasmtime, binaryen
 glo-local ts                      # Node/npm
 glo-local ps                      # PureScript tooling via npm

@@ -46,7 +46,7 @@ Commands:
   base      Install common CLI tools
   py        Install Python/uv tooling
   rs        Install Rust ${RUST_VERSION} with rustfmt/clippy/rust-analyzer/rust-src, wasm32 target, cargo-binstall, and cargo-run-bin
-  hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, ormolu, hlint via ghcup
+  hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, fourmolu, hlint via ghcup
   wasm      Install wasm32-wasi GHC tooling via ghc-wasm-meta (${WASM_GHC_FLAVOUR})
   rocq      Install Rocq ${ROCQ_VERSION}, vsrocqtop, Equations, QuickChick, Hammer, and command-line tools via opam
   smt       Install Z3 ${Z3_VERSION} from GitHub releases
@@ -245,9 +245,9 @@ install_hs() {
     run ghcup install stack "$STACK_VERSION" --set
     run ghcup install hls "$HLS_VERSION" --set
     run ghcup config add-release-channel 3rdparty
-    run ghcup install ormolu || warn "ormolu install failed; continuing"
+    run ghcup install fourmolu
     run ghcup install hlint
-    link_latest_ghcup_tool ormolu || warn "ormolu link failed; continuing"
+    link_latest_ghcup_tool fourmolu
     link_latest_ghcup_tool hlint
 }
 
@@ -612,7 +612,7 @@ doctor() {
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
     source_nvm >/dev/null 2>&1 || true
-    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper ormolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt opam rocq rocqchk vsrocqtop z3 nvm node npm purs spago purs-tidy zk secretspec; do
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper fourmolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt opam rocq rocqchk vsrocqtop z3 nvm node npm purs spago purs-tidy zk secretspec; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else

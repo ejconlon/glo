@@ -376,7 +376,7 @@ RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
     npm install -g purescript spago purs-tidy; \
     fi
 
-# Install ghcup and Haskell toolchain (ghc, cabal, stack, hls, ormolu, hlint)
+# Install ghcup and Haskell toolchain (ghc, cabal, stack, hls, fourmolu, hlint)
 # To update ghcup: change GHCUP_VERSION, then get SHA256s from:
 #   https://downloads.haskell.org/~ghcup/<version>/SHA256SUMS
 ARG HASKELL_ENABLED=0
@@ -407,9 +407,9 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     ghcup install stack "${STACK_VERSION}" --set; \
     ghcup install hls "${HLS_VERSION}" --set; \
     ghcup config add-release-channel 3rdparty; \
-    ghcup install ormolu; \
+    ghcup install fourmolu; \
     ghcup install hlint; \
-    ln -sf /usr/local/.ghcup/bin/ormolu-* /usr/local/bin/ormolu; \
+    ln -sf /usr/local/.ghcup/bin/fourmolu-* /usr/local/bin/fourmolu; \
     ln -sf /usr/local/.ghcup/bin/hlint-* /usr/local/bin/hlint; \
     fi
 

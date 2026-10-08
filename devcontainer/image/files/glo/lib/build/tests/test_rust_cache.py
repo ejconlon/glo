@@ -220,6 +220,7 @@ def test_oversized_cache_cleans_host_cross_targets_then_complete_tree(
     project.emit_rust_target_prune(script)
 
     environment = os.environ.copy()
+    environment["WORKSPACE"] = str(tmp_path)
     environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
     environment["GLO_TEST_CARGO_LOG"] = str(cargo_log)
     counter_file = target_directory.parent / ".rust-target-prune-iterations"
@@ -280,6 +281,7 @@ def test_prune_iteration_configuration_and_counter_recovery(tmp_path: Path) -> N
     rendered = script.to_bash()
 
     environment = os.environ.copy()
+    environment["WORKSPACE"] = str(tmp_path)
     environment["GLO_RUST_TARGET_PRUNE_MIN_ITERATIONS"] = "3"
     subprocess.run(
         ["bash"],

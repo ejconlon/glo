@@ -1618,27 +1618,26 @@ def cmd_venv_haskell(script: Script, project: Project, args: list[str]) -> None:
 
 @command("format", "Format code", lang=Lang.Haskell)
 def cmd_format_haskell(script: Script, project: Project, args: list[str]) -> None:
-    """Format Haskell code with ormolu."""
-    del args  # unused
+    """Format Haskell sources, preferring project settings over workspace settings."""
     script.info(f"Formatting {project.path}")
     path = script.workspace_path(project.abs_path)
     script.enter_project(path)
-    dirs = ["src"]
-    if (project.abs_path / "test").exists():
-        dirs.append("test")
+    dirs = [d for d in ("src", "test", "app") if (project.abs_path / d).is_dir()]
+    if not dirs:
+        return
     script.raw(
-        'if ! command -v ormolu >/dev/null 2>&1; then echo "[I] Skipping Haskell format; ormolu not found"; exit 0; fi'
+        'if ! command -v fourmolu >/dev/null 2>&1; then echo "[E] fourmolu not found; install it with glo-local hs" >&2; exit 1; fi'
     )
-    script.raw('_ORMOLU_CONF="${WORKSPACE}/config/hs/ormolu.yaml"')
-    script.raw(
-        '[ -f "$_ORMOLU_CONF" ]'
-        ' && _ORMOLU_ARGS="--config=$_ORMOLU_CONF"'
-        " || _ORMOLU_ARGS="
-    )
+    script.raw("_FOURMOLU_ARGS=()")
+    script.raw("if [ -f fourmolu.yaml ]; then")
+    script.raw("    _FOURMOLU_ARGS=(--config fourmolu.yaml)")
+    script.raw('elif [ -f "${WORKSPACE}/config/hs/fourmolu.yaml" ]; then')
+    script.raw('    _FOURMOLU_ARGS=(--config "${WORKSPACE}/config/hs/fourmolu.yaml")')
+    script.raw("fi")
     dir_str = " ".join(dirs)
     script.raw(
         f"find {dir_str} -name '*.hs' -type f -print0"
-        " | xargs -0 -r ormolu $_ORMOLU_ARGS --mode inplace"
+        ' | xargs -0 -r fourmolu "${_FOURMOLU_ARGS[@]}" --mode inplace'
     )
 
 
