@@ -17,11 +17,11 @@ ROCQ_VERSION="9.2.0"
 ROCQ_OCAML_VERSION="5.5.0"
 VSROCQ_LANGUAGE_SERVER_PACKAGE="vsrocq-language-server"
 ROCQ_EXTRA_PACKAGES=(rocq-equations.1.3.2+9.2 coq-quickchick.2.2.0 coq-ext-lib.0.13.1 coq-hammer.1.3.3+9.2 coq-hammer-tactics.1.3.3+9.2)
-Z3_VERSION="5.1.0"
-Z3_SHA256_LINUX_X64="f47be8d27d3230e823bf1eeede2fe0abaca55bb78d0b59974370e6689a92284a"
-Z3_SHA256_LINUX_ARM64="2832cfd43c6862fbaf78834b5f1e35d031b4a87e85456b696c1c6f609cd5609e"
-Z3_SHA256_MACOS_X64="f25cabdb01a32942a42227c36902c0846c759dcaabef4aca3b2e86331447f6ff"
-Z3_SHA256_MACOS_ARM64="81d29e934fd863079a74af35eecaeaef8047e0e12414d33ca322b358d68383db"
+CVC5_VERSION="1.4.2"
+CVC5_SHA256_LINUX_X64="7eb18f8c814c36a46c5a7d003983e9cfbc4b0a9828d6dd596239291bd4cc61d8"
+CVC5_SHA256_LINUX_ARM64="765ebee59d9e5efccb60a445fa66fbddfb07a8de9fe7a5b6d128e5c2aafec974"
+CVC5_SHA256_MACOS_X64="f2bbbfe089c77c4a676dd05f262eee86b9718c32374c424138c416024ff42477"
+CVC5_SHA256_MACOS_ARM64="24397f7d022e755876ca836193d4c5f9c1d4326f0f6c01f7d7fc1ddd6bc5096c"
 SECRETSPEC_VERSION="0.19.1"
 SECRETSPEC_SHA256_LINUX_X64="9a0b5882532f5ffbb1c687d9284fa8041949962b05f14fc131050f86c70e1efc"
 SECRETSPEC_SHA256_LINUX_ARM64="9b0804932f011ee13709d06a342cd7d30222a764bb62d343771964471b2a7e25"
@@ -49,7 +49,7 @@ Commands:
   hs        Install GHC ${GHC_VERSION}, cabal ${CABAL_VERSION}, stack ${STACK_VERSION}, HLS ${HLS_VERSION}, fourmolu, hlint via ghcup
   wasm      Install wasm32-wasi GHC tooling via ghc-wasm-meta (${WASM_GHC_FLAVOUR})
   rocq      Install Rocq ${ROCQ_VERSION}, vsrocqtop, Equations, QuickChick, Hammer, and command-line tools via opam
-  smt       Install Z3 ${Z3_VERSION} from GitHub releases
+  smt       Install checksummed cvc5 ${CVC5_VERSION} from GitHub releases
   ts,node   Install nvm-managed Node.js/npm tooling (${NODE_VERSION})
   ps        Install PureScript tooling
   notes     Install zk/sqlite tooling
@@ -357,35 +357,35 @@ install_rocq() {
 }
 
 install_smt() {
-    log "Installing Z3 ${Z3_VERSION} from GitHub releases"
-    local asset checksum archive dist prefix
+    log "Installing cvc5 ${CVC5_VERSION} from checksummed GitHub release"
+    local asset checksum archive dist prefix workdir
     case "$OS/$ARCH" in
-        linux/x86_64) asset="z3-${Z3_VERSION}-x64-glibc-2.39.zip"; checksum="$Z3_SHA256_LINUX_X64" ;;
-        linux/aarch64) asset="z3-${Z3_VERSION}-arm64-glibc-2.38.zip"; checksum="$Z3_SHA256_LINUX_ARM64" ;;
-        arch/x86_64) asset="z3-${Z3_VERSION}-x64-glibc-2.39.zip"; checksum="$Z3_SHA256_LINUX_X64" ;;
-        arch/aarch64) asset="z3-${Z3_VERSION}-arm64-glibc-2.38.zip"; checksum="$Z3_SHA256_LINUX_ARM64" ;;
-        macos/x86_64) asset="z3-${Z3_VERSION}-x64-osx-13.3.zip"; checksum="$Z3_SHA256_MACOS_X64" ;;
-        macos/arm64) asset="z3-${Z3_VERSION}-arm64-osx-13.3.zip"; checksum="$Z3_SHA256_MACOS_ARM64" ;;
-        *) die "Unsupported Z3 platform: $OS/$ARCH" ;;
+        linux/x86_64|arch/x86_64) asset="cvc5-Linux-x86_64-static.zip"; checksum="$CVC5_SHA256_LINUX_X64" ;;
+        linux/aarch64|arch/aarch64) asset="cvc5-Linux-arm64-static.zip"; checksum="$CVC5_SHA256_LINUX_ARM64" ;;
+        macos/x86_64) asset="cvc5-macOS-x86_64-static.zip"; checksum="$CVC5_SHA256_MACOS_X64" ;;
+        macos/arm64) asset="cvc5-macOS-arm64-static.zip"; checksum="$CVC5_SHA256_MACOS_ARM64" ;;
+        *) die "Unsupported cvc5 platform: $OS/$ARCH" ;;
     esac
 
-    archive="/tmp/${asset}"
-    dist="${asset%.zip}"
-    prefix="${Z3_PREFIX:-$HOME/.local/opt/z3-${Z3_VERSION}}"
+    workdir="$(mktemp -d "${TMPDIR:-/tmp}/glo-cvc5.XXXXXX")"
+    trap 'rm -rf "${workdir:-}"' RETURN
+    archive="$workdir/$asset"
+    dist="$workdir/${asset%.zip}"
+    prefix="${CVC5_PREFIX:-$HOME/.local/opt/cvc5-${CVC5_VERSION}}"
+    run curl -fsSLo "$archive" "https://github.com/cvc5/cvc5/releases/download/cvc5-${CVC5_VERSION}/${asset}"
+    verify_archive "$archive" "$checksum"
+    run unzip -q "$archive" -d "$workdir"
     run mkdir -p "$HOME/.local/bin" "$(dirname "$prefix")"
-    run curl -fsSLo "$archive" "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${asset}"
-    run sh -c "printf '%s  %s\n' '$checksum' '$archive' | sha256sum -c -"
-    run rm -rf "$prefix" "/tmp/$dist"
-    run unzip -q "$archive" -d /tmp
-    run mv "/tmp/$dist" "$prefix"
-    run ln -sf "$prefix/bin/z3" "$HOME/.local/bin/z3"
-    run rm -f "$archive"
+    run rm -rf "$prefix"
+    run mv "$dist" "$prefix"
+    run ln -sf "$prefix/bin/cvc5" "$HOME/.local/bin/cvc5"
+    run "$prefix/bin/cvc5" --version
     if [[ "$DRY_RUN" -eq 0 ]]; then
-        command -v z3 >/dev/null 2>&1 || warn "Add $HOME/.local/bin to PATH to use z3"
+        command -v cvc5 >/dev/null 2>&1 || warn "Add $HOME/.local/bin to PATH to use cvc5"
     fi
 }
 
-verify_secretspec_archive() {
+verify_archive() {
     local archive="$1"
     local checksum="$2"
 
@@ -424,7 +424,7 @@ install_secretspec() {
 
     run curl -fsSLo "$archive" \
         "https://github.com/cachix/secretspec/releases/download/v${SECRETSPEC_VERSION}/${asset}"
-    verify_secretspec_archive "$archive" "$checksum"
+    verify_archive "$archive" "$checksum"
     run tar -xJf "$archive" -C "$workdir"
     run mkdir -p "$HOME/.local/bin" "$HOME/.local/opt"
     run rm -rf "$prefix"
@@ -612,7 +612,7 @@ doctor() {
     printf 'Arch: %s\n' "$ARCH"
     printf 'Pkg:  %s\n' "$PKG"
     source_nvm >/dev/null 2>&1 || true
-    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper fourmolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt opam rocq rocqchk vsrocqtop z3 nvm node npm purs spago purs-tidy zk secretspec; do
+    for tool in git gh devcontainer just fd bat rg shellcheck jq yq sqlite3 sha256sum uv python3 rustup rustc cargo cargo-binstall cargo-bin ghcup ghc cabal stack haskell-language-server-wrapper fourmolu hlint wasm32-wasi-ghc wasm32-wasi-cabal wasm32-wasi-ghc-pkg wasm32-wasi-hsc2hs wasmtime wasm-opt opam rocq rocqchk vsrocqtop cvc5 nvm node npm purs spago purs-tidy zk secretspec; do
         if command -v "$tool" >/dev/null 2>&1; then
             printf '%-32s %s\n' "$tool" "$(command -v "$tool")"
         else

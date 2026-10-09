@@ -40,13 +40,15 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import textwrap
 import tomllib
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, cast
 
 # ---------------------------------------------------------------------------
 # Workspace root configuration
@@ -598,6 +600,18 @@ class TargetStep:
     args: list[str] | None = None  # Args for target/command steps
 
 
+@dataclass(frozen=True)
+class CustomTarget:
+    """Executable target steps and optional documentation from the leading entry."""
+
+    steps: list[TargetStep]
+    doc: str | None = None
+
+
+class BuildConfigError(ValueError):
+    """An invalid build manifest that should be reported without a traceback."""
+
+
 _NON_BUILDING_CARGO_SUBCOMMANDS = frozenset(
     {
         "clean",
@@ -654,7 +668,7 @@ class BuildConfig:
     language_str: str  # "py", "ps", or "meta"
     py_package: str | None = None  # e.g., "glo_core" (Python only)
     extra_deps: list[str] | None = None
-    targets: dict[str, list[TargetStep]] | None = None  # Custom targets
+    targets: dict[str, CustomTarget] | None = None
     enabled: bool = True
 
     @property
@@ -692,6 +706,39 @@ class BuildConfig:
         raise ValueError(f"Unknown language: {self.language_str}")
 
 
+def parse_custom_target(name: str, entries: object, manifest: Path) -> CustomTarget:
+    """Separate a leading doc object from steps, diagnosing invalid documentation."""
+    context = f"{manifest}: target '{name}'"
+    if not isinstance(entries, list):
+        raise BuildConfigError(f"{context} must be an array")
+    doc = None
+    steps = []
+    for index, raw_entry in enumerate(entries):
+        location = f"{context}, entry {index + 1}"
+        if not isinstance(raw_entry, dict):
+            raise BuildConfigError(f"{location} must be an object")
+        entry = cast(dict[str, Any], raw_entry)
+        if "doc" in entry:
+            if index != 0:
+                raise BuildConfigError(f"{location}: doc must be the first entry")
+            if set(entry) != {"doc"}:
+                raise BuildConfigError(f"{location}: doc must be in its own object")
+            if not isinstance(entry["doc"], str) or not entry["doc"].strip():
+                raise BuildConfigError(f"{location}: doc must be a nonempty string")
+            doc = entry["doc"].strip()
+        else:
+            steps.append(
+                TargetStep(
+                    target=entry.get("target"),
+                    command=entry.get("command"),
+                    args=entry.get("args"),
+                )
+            )
+    if doc is not None and not any(step.target or step.command for step in steps):
+        raise BuildConfigError(f"{context}: doc must be followed by executable steps")
+    return CustomTarget(steps, doc)
+
+
 def read_build_json(project_path: Path, rel_path: str) -> BuildConfig | None:
     """Read build.json from a project directory.
 
@@ -713,20 +760,12 @@ def read_build_json(project_path: Path, rel_path: str) -> BuildConfig | None:
         raise ValueError(f"Invalid language '{language_str}' in {build_json}")
 
     # Parse targets if present
-    targets: dict[str, list[TargetStep]] | None = None
+    targets: dict[str, CustomTarget] | None = None
     if "targets" in data:
-        targets = {}
-        for target_name, steps in data["targets"].items():
-            target_steps = []
-            for step in steps:
-                target_steps.append(
-                    TargetStep(
-                        target=step.get("target"),
-                        command=step.get("command"),
-                        args=step.get("args"),
-                    )
-                )
-            targets[target_name] = target_steps
+        targets = {
+            name: parse_custom_target(name, entries, build_json)
+            for name, entries in data["targets"].items()
+        }
 
     return BuildConfig(
         _path=rel_path,
@@ -828,7 +867,8 @@ class Project:
         """Get a custom target by name from build.json, or None if not defined."""
         config = self.build_config
         if config and config.targets:
-            return config.targets.get(name)
+            target = config.targets.get(name)
+            return target.steps if target is not None else None
         return None
 
     def emit_env(self, script: Script) -> None:
@@ -2840,6 +2880,79 @@ def show_help(all_projects: list[str]) -> None:
     print(f"  {cli} --help                            # Show command-line options")
 
 
+def help_width() -> int:
+    """Choose a readable help width while accommodating narrow terminals."""
+    return max(40, min(100, shutil.get_terminal_size((100, 24)).columns))
+
+
+def target_summary(target: CustomTarget) -> str:
+    """Use the documentation's first paragraph, falling back to executable steps."""
+    if target.doc:
+        return " ".join(re.split(r"\n\s*\n", target.doc, maxsplit=1)[0].split())
+    parts = []
+    for step in target.steps:
+        if step.target:
+            parts.append(f"target:{step.target}")
+        elif isinstance(step.command, list):
+            parts.append(f"{len(step.command)} commands")
+        elif step.command:
+            command = " ".join(step.command.split())
+            preview = command[:30] + "..." if len(command) > 30 else command
+            parts.append(f"'{preview}'")
+    return f"[{' → '.join(parts)}]"
+
+
+def print_target_summary(name: str, summary: str) -> None:
+    """Wrap descriptions and place long target names on their own line."""
+    width = help_width()
+    prefix = f"  {name:20} "
+    if len(name) > 20 or len(prefix) > width // 2:
+        print(f"  {name}")
+        prefix = "    "
+    print(
+        textwrap.fill(
+            summary,
+            width,
+            initial_indent=prefix,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+    )
+
+
+def print_target_doc(doc: str) -> None:
+    """Wrap prose paragraphs and list items, preserving indented example blocks."""
+    width = help_width()
+    for index, paragraph in enumerate(re.split(r"\n\s*\n", doc)):
+        if index:
+            print()
+        lines = paragraph.splitlines()
+        if any(line.startswith(("    ", "\t")) for line in lines):
+            print(paragraph)
+        elif any(re.match(r"\s*(?:[-*]|\d+[.)])\s+", line) for line in lines):
+            for line in lines:
+                marker = re.match(r"\s*(?:[-*]|\d+[.)])\s+", line)
+                print(
+                    textwrap.fill(
+                        line,
+                        width,
+                        subsequent_indent=" " * (marker.end() if marker else 2),
+                        break_long_words=False,
+                        break_on_hyphens=False,
+                    )
+                )
+        else:
+            print(
+                textwrap.fill(
+                    " ".join(paragraph.split()),
+                    width,
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+            )
+
+
 def show_project_help(project_path: str) -> None:
     """Print help for a specific project."""
     cli = cli_invocation()
@@ -2854,22 +2967,8 @@ def show_project_help(project_path: str) -> None:
     # Show custom targets
     if config and config.targets:
         print("Custom targets:")
-        for name, steps in config.targets.items():
-            step_summary = []
-            for step in steps:
-                if step.target:
-                    step_summary.append(f"target:{step.target}")
-                elif step.command:
-                    if isinstance(step.command, list):
-                        step_summary.append(f"{len(step.command)} commands")
-                    else:
-                        cmd_preview = (
-                            step.command[:30] + "..."
-                            if len(step.command) > 30
-                            else step.command
-                        )
-                        step_summary.append(f"'{cmd_preview}'")
-            print(f"  {name:20} [{' → '.join(step_summary)}]")
+        for name, target in config.targets.items():
+            print_target_summary(name, target_summary(target))
         print()
 
     # Show applicable built-in commands
@@ -2892,15 +2991,24 @@ def show_target_help(project_path: str, target_name: str) -> None:
     project = Project(project_path)
 
     # Check if it's a custom target
-    custom_steps = project.get_custom_target(target_name)
-    if custom_steps:
+    config = project.build_config
+    target = config.targets.get(target_name) if config and config.targets else None
+    if target is not None:
         print(f"Custom target: {target_name}")
         print(f"Project: {project_path}")
         print()
+        if target.doc:
+            print_target_doc(target.doc)
+            print()
+        print(f"Usage: {cli_invocation()} {project_path} {target_name} [-- ARGS...]")
+        print("Arguments after -- are forwarded to the last executable step.")
+        print()
         print("Steps:")
-        for i, step in enumerate(custom_steps, 1):
+        for i, step in enumerate(target.steps, 1):
             if step.target:
-                print(f"  {i}. Run target: {step.target}")
+                print(
+                    f"  {i}. Run target: {shlex.join([step.target, *(step.args or [])])}"
+                )
             elif step.command:
                 if isinstance(step.command, list):
                     print(f"  {i}. Run commands:")
@@ -2908,6 +3016,8 @@ def show_target_help(project_path: str, target_name: str) -> None:
                         print(f"       {step_cmd}")
                 else:
                     print(f"  {i}. Run: {step.command}")
+                if step.args:
+                    print(f"     With arguments: {shlex.join(step.args)}")
         return
 
     # Check if it's a built-in command
@@ -3667,8 +3777,8 @@ def is_exact_project_path(workspace_root: Path, pattern: str) -> bool:
     )
 
 
-def main(workspace_root: Path | None = None) -> int:
-    """Main entry point.
+def run_cli(workspace_root: Path | None = None) -> int:
+    """Parse requests and render help or plan the selected build commands.
 
     Args:
         workspace_root: Root directory of the workspace. If None, computed from
@@ -3854,6 +3964,15 @@ Examples:
         return run_sequential(
             items, run_projects, ws_root, color, parsed.dryrun, parsed.plan_path
         )
+
+
+def main(workspace_root: Path | None = None) -> int:
+    """Run the CLI, reporting invalid custom target metadata without a traceback."""
+    try:
+        return run_cli(workspace_root)
+    except BuildConfigError as error:
+        log_error(str(error))
+        return 1
 
 
 if __name__ == "__main__":

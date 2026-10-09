@@ -179,6 +179,32 @@ not become workspace-wide commands and cannot consume arguments to another
 project's target. Arguments after `--` are passed to the selected target
 exactly, even when they match a core command or another project's target name.
 
+Document a custom target with a `doc` object as the first array entry:
+
+```json
+{
+  "language": "meta",
+  "targets": {
+    "report": [
+      { "doc": "Generate the project report.\n\nPass --output PATH to choose the destination." },
+      { "command": "./report.sh" }
+    ]
+  }
+}
+```
+
+`glo-build /lib/foo` shows the first documentation paragraph as a summary,
+wrapping descriptions to the terminal width. `glo-build /lib/foo report --help`
+shows the full description, usage, and numbered executable steps. Plain-text
+paragraphs and bullet lists are wrapped; indented examples retain their layout.
+Targets without docs still show a short command preview.
+
+The `doc` value must be a nonempty string in its own object, at the start of the
+array, followed by executable steps. Misplaced or malformed docs are errors.
+Documentation never runs or consumes arguments; arguments after `--` still go
+to the last executable step. Use `report -- --help` to pass help to the command
+itself.
+
 Mode flags:
 
 ```sh
@@ -322,6 +348,7 @@ glo-local py                      # Python and uv
 glo-local rs                      # Rust 1.97.1 + rustfmt/clippy/rust-analyzer/rust-src
 glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, fourmolu, hlint via ghcup
 glo-local wasm                    # wasm32-wasi GHC, wasm32-wasi-cabal, wasmtime, binaryen
+glo-local smt                     # checksummed cvc5 1.4.2
 glo-local ts                      # Node/npm
 glo-local ps                      # PureScript tooling via npm
 glo-local notes                   # zk/sqlite
@@ -329,6 +356,13 @@ glo-local secretspec              # checksummed Apache-2.0 SecretSpec release
 ```
 
 `glo local ...` is equivalent to `glo-local ...`.
+
+The image's `SMT_ENABLED=1` and `glo-local smt` install
+[cvc5 1.4.2](https://github.com/cvc5/cvc5/releases/tag/cvc5-1.4.2).
+Both use the official static archives with pinned SHA-256 checksums. The image
+supports Linux x86_64 and arm64; the local installer also supports macOS on
+both architectures. `CVC5_PREFIX` overrides the local installation directory,
+which defaults to `~/.local/opt/cvc5-1.4.2`.
 
 ### Optional PostgreSQL 18 test cluster
 

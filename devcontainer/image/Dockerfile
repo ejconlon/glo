@@ -477,24 +477,24 @@ RUN if [ "${ROCQ_ENABLED}" = "1" ]; then \
 
 # Install SMT solver tooling from GitHub releases.
 ARG SMT_ENABLED=0
-ARG Z3_VERSION=5.1.0
-ARG Z3_SHA256_X64=f47be8d27d3230e823bf1eeede2fe0abaca55bb78d0b59974370e6689a92284a
-ARG Z3_SHA256_ARM64=2832cfd43c6862fbaf78834b5f1e35d031b4a87e85456b696c1c6f609cd5609e
+ARG CVC5_VERSION=1.4.2
+ARG CVC5_SHA256_X64=7eb18f8c814c36a46c5a7d003983e9cfbc4b0a9828d6dd596239291bd4cc61d8
+ARG CVC5_SHA256_ARM64=765ebee59d9e5efccb60a445fa66fbddfb07a8de9fe7a5b6d128e5c2aafec974
 RUN if [ "${SMT_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
     case "${arch}" in \
-        x86_64) asset="z3-${Z3_VERSION}-x64-glibc-2.39.zip"; checksum="${Z3_SHA256_X64}" ;; \
-        aarch64) asset="z3-${Z3_VERSION}-arm64-glibc-2.38.zip"; checksum="${Z3_SHA256_ARM64}" ;; \
+        x86_64) asset="cvc5-Linux-x86_64-static.zip"; checksum="${CVC5_SHA256_X64}" ;; \
+        aarch64) asset="cvc5-Linux-arm64-static.zip"; checksum="${CVC5_SHA256_ARM64}" ;; \
         *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSLo "/tmp/${asset}" "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${asset}"; \
+    curl -fsSLo "/tmp/${asset}" "https://github.com/cvc5/cvc5/releases/download/cvc5-${CVC5_VERSION}/${asset}"; \
     echo "${checksum}  /tmp/${asset}" | sha256sum -c -; \
     unzip -q "/tmp/${asset}" -d /opt; \
-    mv "/opt/${asset%.zip}" "/opt/z3-${Z3_VERSION}"; \
-    ln -sf "/opt/z3-${Z3_VERSION}/bin/z3" /usr/local/bin/z3; \
+    mv "/opt/${asset%.zip}" "/opt/cvc5-${CVC5_VERSION}"; \
+    ln -sf "/opt/cvc5-${CVC5_VERSION}/bin/cvc5" /usr/local/bin/cvc5; \
     rm -f "/tmp/${asset}"; \
-    z3 --version; \
+    cvc5 --version; \
     fi
 
 # Setup home
