@@ -143,11 +143,11 @@ install_base() {
     log "Installing base tools for ${OS}/${ARCH}"
     case "$OS" in
         arch)
-            pkg_install base-devel bash coreutils git github-cli jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip tar gzip bzip2 xz zstd openssh make pkgconf
+            pkg_install base-devel bash coreutils git github-cli jq yq just fd bat less ripgrep shellcheck sqlite wget curl unzip zip tar gzip bzip2 xz zstd openssh make pkgconf
             run aura -A devcontainer-cli
             ;;
         macos)
-            pkg_install bash coreutils devcontainer git gh jq yq just fd bat ripgrep shellcheck sqlite wget curl unzip zip xz zstd pkgconf
+            pkg_install bash coreutils devcontainer git gh jq yq just fd bat less ripgrep shellcheck sqlite wget curl unzip zip xz zstd pkgconf
             ;;
     esac
 }

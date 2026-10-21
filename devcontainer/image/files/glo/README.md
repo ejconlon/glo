@@ -6,7 +6,7 @@ Use glo to manage work in this repository: issues, agent focus, builds, generate
 
 - Run commands from inside the workspace git repository.
 - Workspace lookup uses the current directory or nearest ancestor with a `.git` directory. A `.git` file, as used by linked worktrees and submodules, does not establish a workspace root.
-- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-caddy`, `glo-garage`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-board`, `glo-build`, `glo-caddy`, `glo-garage`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
 - `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes. They prefer `/opt/glo/bin` when installed and otherwise use the checkout scripts.
 - `glo issue ...`, `glo build ...` and the other dispatcher commands invoke their `glo-*` counterparts. `glo readme` prints this guide from the selected glo installation.
 - Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
@@ -31,7 +31,7 @@ a different notebook directory.
 
 ### Notebook directory
 
-`GLO_BASE` selects the notebook root for `glo-issue`, `glo-agent`, `glo-notes`
+`GLO_BASE` selects the notebook root for `glo-issue`, `glo-board`, `glo-agent`, `glo-notes`
 and `bootstrap.sh`, including commands invoked through the `glo` dispatcher.
 
 - **Default:** Unset or empty `GLO_BASE` uses `<workspace>/base`.
@@ -121,6 +121,13 @@ glo-issue query                           # emit JSON lines
 ```
 
 Use dependencies for blocking relationships. Use links for related work that does not block progress.
+Use `create --parent <epic-id>` or `set <child-id> parent=<epic-id>` to group
+work under an epic. Parent membership is separate from blocking: do not put
+the parent in a child's `deps` or list children in the epic's `deps` merely
+to represent membership. Check the epic's children when assessing completion.
+Parents resolve across active and archived issues; partial IDs are stored in
+full. Missing parents, self-parenting and ancestry cycles are rejected before
+writing. `set <id> parent=` clears membership and leaves dependencies unchanged.
 Relationship commands accept unambiguous partial IDs and store full IDs.
 `show` resolves parent, child, blocker and linked-issue context across both
 locations. `dep tree` includes archived dependencies; `dep cycle` checks
@@ -172,7 +179,8 @@ glo-issue set <id> plan=
 - **Lifecycle:** `status=` accepts the existing status values and restores an
   archived issue to the active directory when set to `open` or `in_progress`.
   Updating other attributes leaves an archived issue in place. Issue IDs cannot
-  be changed; use `dep`/`undep` and `link`/`unlink` to change relationships.
+  be changed; use `parent=` for membership, `dep`/`undep` for prerequisites,
+  and `link`/`unlink` for related work.
 
 Custom attributes such as `plan` are stored and filtered as data. Glo does not
 enforce their meaning; follow the workspace's instructions for plan review and
@@ -279,6 +287,117 @@ glo-issue reopen <id>     # restore it to the active directory and set status op
 Use `unarchive` when you want only to move the file. Use `reopen` or `start`
 when you want to resume the work as open or in progress, respectively.
 
+## Kanban Board
+
+`glo board` (or `glo-board`) opens an interactive terminal board. The UI is
+written in Bash and uses `jq`, `stty` and `tput`; all issue reads and changes
+go through `glo-issue`. It inherits `GLO_BASE` and the direct issue command's
+`TICKETS_DIR` override. Help works without an interactive terminal.
+
+```sh
+glo board                  # active issues; detail wrap width defaults to 120
+glo board --wrap-width 80  # target 80 columns when opening details
+glo board --wrap-width 0   # automatic terminal width, including on resize
+glo board --help           # full argument and keyboard reference
+```
+
+Board settings are controlled inside the board; `--wrap-width N` (also
+`--wrap-width=N`) additionally sets the detail viewer's initial target width.
+For an epic planning board, press `g`, type `plan`, and press Enter;
+then press `f`, type `type=epic`, and press Enter. Escape cancels a prompt.
+
+- **Grouping:** `g` prompts for a scalar field; an empty response restores
+  `status`. Status columns default to `open`, `in_progress`, `closed`.
+  `plan` uses `create`, `review`, `reject`, `accept`. Other scalar fields
+  discover existing values in alphabetical order. Changing the group resets
+  custom columns and keeps filters.
+- **Columns:** `c` adds a column value. The first addition replaces automatic
+  columns; subsequent additions append in order, including empty destinations.
+  `C` resets columns to their automatic order; use `C` then `c` to start a
+  different custom list. For example, group by `team`, then add `core` and `tools`.
+  List-valued grouping is rejected. Missing or empty values appear in **Unassigned**;
+  unlisted values appear in **Other**. These are display buckets, not move
+  destinations; use attribute editing to set an empty value.
+- **Icebox:** `i` toggles the icebox column on status boards. It starts hidden,
+  and hidden iceboxed cards do not appear under **Other**. Adding `icebox`
+  with `c` also shows it. Resetting columns keeps the icebox visibility choice.
+  This setting applies only to status grouping; other groups include matching
+  iceboxed issues normally.
+- **Filters:** `f` adds a literal `key=value` filter; repeat it to require all
+  matches, using the same semantics as `glo-issue query`. `F` clears attribute
+  filters. For example, enter `tags=peal` to match that tag. Invalid settings
+  display an error and retain the previous view.
+- **Archive scope:** `v` cycles between active issues, all issues (active and
+  archived), and archived issues only. The current scope appears in the header.
+  Archive selection concerns storage, independently of grouping and filters.
+- **Epics:** Each column groups cards under epic headings using explicit
+  `parent` ancestry, including archived or filtered-out ancestors. `deps`
+  never determine grouping. Epics sort by title and ID; each group shows its
+  epic card first when selected by the filters, then children by priority and
+  ID. Standalone issues remain visible under **No epic**. Broken references
+  and manually edited cycles receive visible diagnostic headings. Use `s`
+  with `parent=<epic-id>` to change membership, or `parent=` to clear it.
+- **Navigation:** Arrow keys or `h/j/k/l` select columns and cards. Cards
+  show the four-character ID suffix and priority, such as `abcd P2`, followed
+  by up to three title lines wrapped at word boundaries. Continuation lines align with the title;
+  overflow ends in an ellipsis. Archived cards also show `[A]`. Actions use
+  full IDs internally, including when suffixes coincide.
+  Enter opens issue details in the external pager; use that pager's controls
+  to search and scroll, then quit it to return to the board. `?` opens built-in
+  help (`j/k` scroll, Escape or `q` returns); `q` on the board exits.
+  Narrow terminals scroll columns horizontally.
+- **Pager:** `$PAGER` overrides the details viewer. Otherwise, use `bat` when
+  it is on `PATH`, with Markdown highlighting and `--style=plain --wrap=never`.
+  Bat passes complete source lines to `less -R --wordwrap -+S`, which wraps at
+  spaces. `-R` preserves highlighting
+  colors; `-+S` disables line chopping even if enabled in `$LESS`.
+  The same less options apply to the plain-text fallback when bat is absent.
+  This requires less with
+  `--wordwrap` support (introduced in version 621); Glo installs less in its
+  image and base host tooling. These are display wraps; issue files are unchanged.
+  `PAGER='less -R'` accepts whitespace-separated arguments without shell
+  evaluation or glob expansion. A single executable path can contain spaces;
+  use a wrapper script for commands requiring quoted arguments or shell syntax.
+  The pager receives a temporary, sanitized issue snapshot. On exit the
+  snapshot is removed and the board refreshes; pager failures are shown on
+  the board without ending the session.
+- **Detail width:** The default target is 120 columns. Set `--wrap-width N`
+  at startup or press `w` in the board to change it. `N` must be a nonnegative
+  integer. A positive width sets `LESS_COLUMNS` for the default viewer, clamped
+  to the terminal width when details open. It stays fixed for that pager session;
+  reopen details after resizing to recalculate. `0` removes the override and
+  lets less follow the full terminal width, including live resizing. These
+  settings override ambient `LESS_COLUMNS` for the default viewer only; an
+  explicit `$PAGER` keeps its own configuration. The Kanban layout is unaffected.
+- **Changes:** `m` opens a destination picker; arrows or `h/j/k/l` choose,
+  Enter applies, and Escape cancels. Moving updates only the grouping field.
+  `n` prompts for a title and creates an issue with backend defaults; `s`
+  prompts for one literal `key=value` assignment; `e` opens `$EDITOR` (or `vi`)
+  through `glo-issue edit`. `a` archives or unarchives after `y` and Enter.
+  Backend rules still apply: only closed or iceboxed issues may be archived,
+  and setting an active status restores an archived issue. Changing `plan`
+  does not change status.
+- **Refresh:** `r` reloads, preserving the selected ID where possible. Changes
+  and editor exit refresh automatically. A new or changed issue may disappear
+  from the current filters or archive scope. Errors appear on the board without
+  exiting. There is no background refresh or saved board configuration.
+- **Terminal:** Exiting or receiving an interrupt restores terminal settings.
+  The editor and pager receive the normal terminal. Text control characters are removed
+  from display; Unicode remains visible, with approximate wide-character
+  alignment. The minimum usable size is 20 columns by 8 rows.
+
+The board uses `glo-issue query --details`, an opt-in JSON Lines format:
+
+```json
+{"attributes":{"id":"example","status":"open","priority":"2"},"title":"Example","archived":false}
+```
+
+`attributes` contains the existing query record; `title` is the first Markdown
+level-one heading, or an empty string if absent; `archived` is a boolean derived
+from storage location. Without `--details`, query output remains frontmatter
+only. Attribute filters and optional jq predicates still select frontmatter
+attributes, including when `--details` is present.
+
 ## Agent Focus
 
 Use `glo-agent` when acting as an agent. It wraps issue operations with ownership checks and a focus stack.
@@ -343,11 +462,17 @@ checks; inspect that recipe and the workspace instructions for its scope.
 
 ## Builds
 
-`glo-build` currently discovers `lib/*/build.json` and
-`lib/*/*/build.json`: one or two directory levels below `lib/`. For example,
-`lib/foo/build.json` and `lib/foo/bar/build.json` are detected, but
-`lib/foo/bar/baz/build.json` is not. Each project declares a `language`;
+`glo-build` discovers `build.json` files at one, two, or three directory levels
+below `lib/`. For example, `lib/foo/build.json`, `lib/foo/bar/build.json`, and
+`lib/foo/bar/baz/build.json` are detected, but `lib/foo/bar/baz/quux/build.json`
+is not. Discovery does not descend into deeper directories. Exact project
+selectors use the same boundary. Changed files belong to their nearest
+discovered project ancestor. Each project declares a `language`;
 optional fields include `py_package`, `extra_deps`, `targets`, and `enabled`.
+
+Local source checkouts use the editable Glo build package. If a workspace uses
+an installed copy under `/opt/glo`, rebuild its Glo image to pick up changes to
+discovery or templates.
 
 Common commands:
 
@@ -533,7 +658,11 @@ Template types:
 - `meta`: build/config component.
 - `py`: Python package.
 - `ps`: PureScript package.
-- `hs`: Haskell package.
+- `hs`: Haskell package with a shared `common defaults` stanza (GHC2024 and
+  default extensions) imported by the library and test suite. Its `cabal.project`
+  includes the local package and enables tests; repository-specific dependency
+  policy imports can be added by the consuming workspace. Tests use
+  `-threaded -rtsopts` so they support the threaded runtime and runtime options.
 - `rocq`: Rocq proof project.
 - `rs`: Rust crate.
 - `ts`: TypeScript package.

@@ -130,6 +130,26 @@ yaml_field() {
     ' "$1"
 }
 
+# Resolve parent membership independently of dependencies, rejecting ancestry cycles.
+resolve_parent() {
+    local child="$1" requested="$2" file parent current seen="|$1|"
+    [[ -n "$requested" ]] || { printf '\n'; return 0; }
+    file=$(ticket_path "$requested") || return 1
+    parent=$(basename "$file" .md)
+    current="$parent"
+    while [[ -n "$current" ]]; do
+        file=$(ticket_path "$current") || return 1
+        current=$(basename "$file" .md)
+        if [[ "$seen" == *"|$current|"* ]]; then
+            echo "Error: parent relationship for '$child' would contain a cycle" >&2
+            return 1
+        fi
+        seen+="$current|"
+        current=$(yaml_field "$file" parent) || current=""
+    done
+    printf '%s\n' "$parent"
+}
+
 # Validate the flat attribute assignments shared by issue mutations.
 validate_attribute_assignment() {
     local expression="$1"
@@ -234,6 +254,13 @@ cmd_create() {
             --external-ref) external_ref="$2"; shift 2 ;;
             --parent) parent="$2"; shift 2 ;;
             --tags) tags="$2"; shift 2 ;;
+            --)
+                shift
+                if [[ $# -ne 1 ]]; then
+                    echo "Error: create -- requires one title argument" >&2
+                    return 1
+                fi
+                title="$1"; shift ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
             *) title="$1"; shift ;;
         esac
@@ -242,6 +269,7 @@ cmd_create() {
     title="${title:-Untitled}"
     local id
     id=$(generate_id "$title")
+    parent=$(resolve_parent "$id" "$parent") || return 1
     local file="$TICKETS_DIR/${id}.md"
     local now
     now=$(_iso_date)
@@ -1484,8 +1512,19 @@ cmd_edit() {
 cmd_query() {
     [[ ! -d "$TICKETS_DIR" ]] && return 0
 
+    local -x GLO_ISSUE_QUERY_DETAILS=0
+    local argument
+    local -a arguments=()
+    for argument in "$@"; do
+        if [[ "$argument" == --details ]]; then
+            GLO_ISSUE_QUERY_DETAILS=1
+        else
+            arguments+=("$argument")
+        fi
+    done
+    set -- "${arguments[@]}"
     if [[ $# -gt 1 || "${1:-}" == -* ]]; then
-        echo "Usage: glo-issue query [--filter key=value]... [jq-filter]" >&2
+        echo "Usage: glo-issue query [--details] [--filter key=value]... [jq-filter]" >&2
         return 1
     fi
     local filter="${1:-}"
@@ -1497,15 +1536,21 @@ cmd_query() {
     # Generate all JSON in one awk pass
     local json_output
     json_output=$(awk "$filter_awk"'
-    BEGIN { FS=": "; in_front=0 }
+    BEGIN {
+        FS=": "; in_front=0
+        for (i = 0; i < 32; i++) controls[sprintf("%c", i)] = sprintf("\\u%04x", i)
+    }
     FNR==1 {
         if (prev_file) emit()
-        field_count=0; in_front=0
+        field_count=0; in_front=0; title=""; title_found=0
         prev_file=FILENAME
         in_front=($0 == "---")
         next
     }
     /^---$/ { in_front = 0; next }
+    !in_front && /^# / && !title_found {
+        title=substr($0, 3); title_found=1
+    }
     in_front && /^[a-zA-Z_][a-zA-Z0-9_-]*:/ {
         colon = index($0, ":")
         key = substr($0, 1, colon - 1)
@@ -1519,14 +1564,14 @@ cmd_query() {
         for (i = 1; i <= length(value); i++) {
             c = substr(value, i, 1)
             if (c == "\\" || c == "\"") result = result "\\" c
-            else if (c == "\t") result = result "\\t"
-            else if (c == "\r") result = result "\\r"
+            else if (c in controls) result = result controls[c]
             else result = result c
         }
         return result "\""
     }
     function emit() {
         if (field_count > 0 && filter_matches(prev_file)) {
+            if (ENVIRON["GLO_ISSUE_QUERY_DETAILS"] == "1") printf "{\"attributes\":"
             printf "{"
             for (i = 1; i <= field_count; i++) {
                 if (i > 1) printf ","
@@ -1547,7 +1592,12 @@ cmd_query() {
                     printf "%s:%s", json_string(key), json_string(val)
                 }
             }
-            printf "}\n"
+            printf "}"
+            if (ENVIRON["GLO_ISSUE_QUERY_DETAILS"] == "1") {
+                archived = (index(prev_file, ENVIRON["GLO_ISSUE_ARCHIVE_DIR"]) == 1)
+                printf ",\"title\":%s,\"archived\":%s}", json_string(title), archived ? "true" : "false"
+            }
+            printf "\n"
         }
     }
     END { if (prev_file) emit() }
@@ -1555,7 +1605,11 @@ cmd_query() {
 
     [[ -n "$json_output" ]] || return 0
     if [[ -n "$filter" ]]; then
-        echo "$json_output" | jq -c "select($filter)"
+        if [[ "$GLO_ISSUE_QUERY_DETAILS" == 1 ]]; then
+            echo "$json_output" | jq -c "select(.attributes | ($filter))"
+        else
+            echo "$json_output" | jq -c "select($filter)"
+        fi
     else
         echo "$json_output"
     fi
@@ -1592,6 +1646,14 @@ cmd_set() {
 
     local file destination
     file=$(ticket_path "$id") || return 1
+    local -a updates=()
+    for expression in "$@"; do
+        if [[ "${expression%%=*}" == parent ]]; then
+            value=$(resolve_parent "$(basename "$file" .md)" "${expression#*=}") || return 1
+            expression="parent=$value"
+        fi
+        updates+=("$expression")
+    done
     destination="$file"
     if [[ "$file" == "$TICKETS_DIR/archive/"* \
         && ( "$status" == "open" || "$status" == "in_progress" ) ]]; then
@@ -1602,12 +1664,12 @@ cmd_set() {
         fi
     fi
 
-    update_yaml_fields "$file" "$@" || return 1
+    update_yaml_fields "$file" "${updates[@]}" || return 1
     if [[ "$destination" != "$file" ]]; then
         mv -- "$file" "$destination" || return 1
     fi
     printf 'Updated %s:' "$(basename "$destination" .md)"
-    printf ' %s' "$@"
+    printf ' %s' "${updates[@]}"
     printf '\n'
 }
 
@@ -1686,7 +1748,7 @@ Create options (values follow the option as a separate argument):
   -p, --priority N        Priority 0-4, 0=highest [default: 2]
   -a, --assignee NAME     Initial assignee [default: AGENT_NAME, otherwise empty]
       --external-ref REF External reference, e.g. gh-123 or JIRA-456
-      --parent ID        Parent issue ID
+      --parent ID        Parent issue ID (membership, not a dependency)
       --tags TAGS        Comma-separated tags, e.g. ui,backend,urgent
 
 Listing options:
@@ -1720,17 +1782,25 @@ Attribute filter behavior:
 Positional arguments and other options:
   id, dep-id, target-id   Issue IDs; unambiguous partial IDs also work
   title                  Issue title [default: Untitled]; quote multiple words
+                          Use create -- TITLE for a title beginning with '-'
   name                   Assignee name; omit it on set-assignee to clear the field
   text                   Note text; add-note also accepts text on standard input
   key=value              Attribute name and its new value; split at the first '='
   jq-filter              jq predicate applied to each JSON issue (query only)
                           Example: $cmd query '.type == "epic"'
+  --details              Query emits {attributes, title, archived} JSON Lines
+                          Missing headings yield an empty title; archived is boolean
+                          Attribute filters and jq predicates still select attributes
   --full                 Show repeated dependency branches (dep tree only)
   -h, --help             Show this reference, including after a command name
 
 Attribute updates:
   $cmd set <id> plan=accept priority=1
   key= leaves an empty value; quote arguments with spaces or inline lists.
+  parent=<id> sets membership; parent= clears it. Parents must exist; partial
+  IDs resolve across active/archive storage and are stored in full. Self-parenting
+  and ancestry cycles are rejected, including on create --parent.
+  Use parent links for epic children, never deps merely to record membership.
   Example: $cmd set <id> 'tags=[peal, syntax]' 'assignee=Jane Doe'
   Status updates use the usual lifecycle; use dep/link commands for relations.
   IDs cannot be changed. All assignments are checked before writing.

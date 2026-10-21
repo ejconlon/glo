@@ -44,6 +44,7 @@ def test_cancellation_terminates_nested_worker_processes(
             stderr=subprocess.STDOUT,
             pass_fds=(writer,),
             start_new_session=True,
+            env={**os.environ, "WORKSPACE": str(script.parent)},
         ) as process:
             os.close(writer)
             try:
@@ -67,6 +68,10 @@ def test_fast_and_failed_workers_report_their_exit_status(tmp_path: Path) -> Non
     ):
         script = plan(tmp_path / str(index), command)
         result = subprocess.run(
-            ["bash", str(script)], capture_output=True, text=True, timeout=10
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**os.environ, "WORKSPACE": str(script.parent)},
         )
         assert (result.returncode == 0) == success, result.stdout + result.stderr

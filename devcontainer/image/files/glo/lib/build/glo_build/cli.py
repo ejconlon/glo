@@ -397,10 +397,11 @@ def get_git_changed_files(mode: str, workspace_root: Path) -> list[str]:
 
 
 def files_to_projects(files: list[str], all_projects: list[str]) -> list[str]:
-    """Map changed files to affected projects."""
+    """Map changed files to their nearest discovered project ancestor."""
     affected = set()
+    nearest_first = sorted(all_projects, key=lambda path: path.count("/"), reverse=True)
     for f in files:
-        for proj in all_projects:
+        for proj in nearest_first:
             # proj has leading "/" (e.g. "/lib/lplean"), git paths don't
             proj_prefix = proj.lstrip("/") + "/"
             if f.startswith(proj_prefix):
@@ -535,8 +536,13 @@ def get_package_to_project(workspace_root: Path, projects: list[str]) -> dict[st
 
 
 def find_project_manifests(lib_dir: Path) -> list[Path]:
-    """Find manifests at the supported one- and two-level project paths."""
-    return sorted((*lib_dir.glob("*/build.json"), *lib_dir.glob("*/*/build.json")))
+    """Find manifests within three project-directory levels without deeper traversal."""
+    return sorted(
+        path
+        for pattern in ("*/build.json", "*/*/build.json", "*/*/*/build.json")
+        for path in lib_dir.glob(pattern)
+        if path.is_file()
+    )
 
 
 def discover_projects(workspace_root: Path) -> list[str]:
@@ -3791,7 +3797,7 @@ def is_exact_project_path(workspace_root: Path, pattern: str) -> bool:
     parts = pattern.split("/")
     return (
         pattern.startswith("/lib/")
-        and len(parts) in (3, 4)
+        and len(parts) in (3, 4, 5)
         and all(part not in ("", ".", "..") for part in parts[2:])
         and (workspace_root / pattern.lstrip("/") / "build.json").is_file()
     )

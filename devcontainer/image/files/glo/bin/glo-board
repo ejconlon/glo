@@ -1,0 +1,604 @@
+#!/usr/bin/env bash
+# Keyboard Kanban client. All issue storage and lifecycle rules belong to glo-issue.
+set -uo pipefail
+
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+ISSUE="$_GLO_BIN_DIR/glo-issue"
+
+usage() {
+    cat <<'HELP'
+Usage: glo-board [--wrap-width N]    (also: glo board)
+       glo-board --help             Print this reference without starting the UI
+
+Configure the board with keyboard controls. The detail viewer also accepts:
+  --wrap-width N    Target line width in columns [default: 120]; 0 uses auto width
+                    Also accepts --wrap-width=N. N must be a nonnegative integer.
+                    Applies to the default bat/less viewer, not an explicit $PAGER.
+Nonzero widths are clamped to the terminal width when details open and remain
+fixed until the pager closes. Reopen details to recalculate after resizing, or
+use 0 for automatic width that follows terminal resizing.
+Columns default to open/in_progress/closed for status and
+create/review/reject/accept for plan. Other fields discover sorted values.
+Icebox is hidden on status boards until requested with i or added with c.
+Other grouping fields include matching iceboxed issues normally.
+Missing/empty values appear in Unassigned; unlisted values appear in Other.
+These two display buckets cannot be move destinations. List fields are rejected.
+Each column groups cards under epic headings using explicit parent ancestry.
+Epic context includes archived/filtered-out issues; deps never imply membership.
+Standalone issues appear under No epic. Within an epic, cards sort by priority
+(0 first), then ID, with the epic card first. Refresh is manual, not periodic.
+Cards show a four-character ID suffix and priority (abcd P2), then up to three
+word-wrapped title lines, with an ellipsis for overflow. Actions use the full ID.
+
+Keys:
+  g                 Group by a scalar field (empty resets to status and auto columns)
+  c                 Add a column value; first addition replaces automatic columns
+  C                 Reset columns to their automatic values and order
+  f                 Add a key=value filter (repeat for AND)
+  F                 Clear all attribute filters
+  v                 Cycle archive scope: active -> all -> archived -> active
+  i                 Toggle icebox on status boards (hidden by default)
+  w                 Set detail wrap width (0 = automatic terminal width)
+  arrows or h/j/k/l  Navigate columns/cards (columns scroll on narrow terminals)
+  Enter             Open details in $PAGER, otherwise bat or less; quit pager to return
+  m                 Choose a destination, Enter moves; Escape cancels
+  n                 Create an issue from a title, using glo-issue defaults
+  s                 Set one key=value attribute on the selected issue
+  e                 Edit the selected issue through glo-issue edit ($EDITOR or vi)
+  a                 Archive/unarchive the selection after y confirmation
+  r                 Refresh, retaining the selected ID when possible
+  ?                 Show scrollable help; q quits (or returns from help)
+  Escape            Cancel a prompt or return to the board
+
+Moving changes only the grouping field. Backend lifecycle rules apply:
+active statuses restore archived issues; only closed/icebox can be archived.
+Creation may be hidden by current filters or archive scope. All changes refresh.
+Grouping changes reset custom columns and keep filters. Column values are added
+in order; use C then c to replace the list. Settings apply only to this session.
+No shell expressions are evaluated. Prompts accept literal single-line text.
+
+Environment: GLO_BASE defaults to base relative to the workspace root; absolute
+paths work too. TICKETS_DIR overrides issue storage as in direct glo-issue calls.
+PAGER overrides the details viewer, with optional whitespace-separated arguments
+(e.g. PAGER='less -R'). Otherwise use bat for Markdown highlighting without
+decorations or pre-wrapping, and less -R --wordwrap -+S for word-aware display
+wrapping. Without bat, use the same less options for plain text. This requires
+less with --wordwrap support; -R preserves colors and -+S disables line chopping.
+An exact executable path may contain spaces.
+Shell expressions and quoting inside a command string are not evaluated.
+Requires an interactive terminal, Bash, jq, stty and tput. Unicode is displayed,
+but wide-character alignment is approximate. No board configuration is saved.
+HELP
+}
+
+# Strip terminal controls from all externally supplied display text.
+sanitize() {
+    printf '%s' "$1" | jq -Rrs 'gsub("[\u0000-\u001f\u007f-\u009f]"; " ")'
+}
+
+fail() { printf 'glo-board: %s\n' "$*" >&2; return 1; }
+
+# Validate decimal input before using it in arithmetic or less's integer width.
+set_wrap_width() {
+    local number=$1
+    [[ "$number" =~ ^[0-9]+$ ]] || return 1
+    number=${number#"${number%%[!0]*}"}
+    number=${number:-0}
+    (( ${#number} <= 10 )) || return 1
+    (( 10#$number <= 2147483647 )) || return 1
+    wrap_width=$((10#$number))
+}
+
+group=status
+scope=active
+show_icebox=0
+wrap_width=120
+filter_values=()
+explicit=()
+while (( $# > 0 )); do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --wrap-width)
+            (( $# >= 2 )) || { fail '--wrap-width requires a nonnegative integer (0 = auto)'; exit 1; }
+            set_wrap_width "$2" || { fail '--wrap-width requires a nonnegative integer (0 = auto)'; exit 1; }
+            shift 2 ;;
+        --wrap-width=*)
+            set_wrap_width "${1#*=}" || { fail '--wrap-width requires a nonnegative integer (0 = auto)'; exit 1; }
+            shift ;;
+        *) fail 'configure the board with keyboard controls; run glo-board --help for keys'; exit 1 ;;
+    esac
+done
+for dependency in jq stty tput; do
+    command -v "$dependency" >/dev/null || { fail "missing command: $dependency"; exit 1; }
+done
+[[ -t 0 && -t 1 ]] || { fail 'an interactive terminal is required'; exit 1; }
+[[ "${TERM:-dumb}" != dumb ]] || { fail 'a cursor-addressable TERM is required'; exit 1; }
+
+names=() values=() counts=() starts=()
+ids=() titles=() priorities=() archives=() epics=() epic_titles=()
+column=0
+card=0
+message=''
+mode=board
+view=()
+view_offset=0
+active=0
+dirty=1
+detail_file=''
+
+# Build a complete replacement snapshot before changing the displayed model.
+refresh() {
+    local selected='' data context model i=0 c=0 id title priority archived epic epic_title
+    local column_json expression
+    local -a filters=()
+    for expression in "${filter_values[@]}"; do filters+=(--filter "$expression"); done
+    [[ "$scope" == all ]] && filters+=(--with-archived)
+    [[ "$scope" == archived ]] && filters+=(--only-archived)
+    column_json=$(printf '%s\0' "${explicit[@]}" | jq -Rsc 'split("\u0000") | map(select(length > 0))') || return 1
+    if (( ${counts[column]:-0} > 0 )); then selected=${ids[$((starts[column]+card))]}; fi
+    if ! data=$("$ISSUE" query --details "${filters[@]}" 2>&1); then
+        message="$(sanitize "$data")"; return 1
+    fi
+    if ! context=$("$ISSUE" query --details --with-archived 2>&1); then
+        message="$(sanitize "$context")"; return 1
+    fi
+    # Stream two arrays instead of passing the notebook through argv size limits.
+    if ! model=$({ jq -s . <<< "$context"; jq -s . <<< "$data"; } |
+      jq -sc --arg key "$group" --argjson columns "$column_json" --argjson icebox "$show_icebox" '
+        def clean: gsub("[\u0000-\u001f\u007f-\u009f]"; " ");
+        (.[0] | map({key: .attributes.id, value: .}) | from_entries) as $issues |
+        def epic($id; $seen):
+            if $id == "" then null
+            elif ($seen | index($id)) != null then {id: $id, title: "Parent cycle: " + $id}
+            elif $issues[$id] == null then {id: $id, title: "Missing parent: " + $id}
+            elif $issues[$id].attributes.type == "epic" then
+                {id: $id, title: $issues[$id].title}
+            else epic(($issues[$id].attributes.parent // ""); $seen + [$id]) end;
+        .[1] |
+        if $key == "status" and $icebox == 0 then map(select(.attributes.status != "icebox")) else . end |
+        if any(.[]; (.attributes[$key] | type) == "array") then
+            error("grouping requires a scalar field: " + $key)
+        else . end |
+        map(epic(.attributes.id; []) as $epic |
+            .epic_id = ($epic.id // "") |
+            .epic_title = (if $epic == null then "No epic"
+                elif $epic.title == "" then $epic.id else $epic.title end)) |
+        sort_by([(.epic_id == ""), .epic_title, .epic_id,
+                 (.attributes.type != "epic"), (.attributes.priority | tonumber? // 2), .attributes.id]) as $cards |
+        (if ($columns | length) > 0 then $columns
+         elif $key == "status" then (if $icebox == 1 then ["icebox"] else [] end) + ["open", "in_progress", "closed"]
+         elif $key == "plan" then ["create", "review", "reject", "accept"]
+         else [$cards[].attributes[$key] // "" | select(length > 0)] | unique end) |
+        reduce .[] as $value ([]; if index($value) == null then . + [$value] else . end) as $values |
+        ([ $values[] as $value |
+            {name: $value, value: $value, cards: [$cards[] | select(.attributes[$key] == $value)]} ] +
+         [{name: "Unassigned", value: "", cards: [$cards[] | select((.attributes[$key] // "") == "")]},
+          {name: "Other", value: "", cards: [$cards[] |
+             .attributes[$key] as $v | select(($v // "") != "" and ($values | index($v)) == null)]}]) |
+        map(select(.value != "" or (.cards | length) > 0)) |
+        if length == 0 then [{name: "Unassigned", value: "", cards: []}] else . end |
+        map(.name |= clean | .cards |= map(.title |= clean | .epic_title |= clean))
+    ' 2>&1); then
+        message="$(sanitize "$model")"; return 1
+    fi
+    names=(); values=(); counts=(); starts=(); ids=(); titles=(); priorities=(); archives=(); epics=(); epic_titles=()
+    while IFS= read -r -d '' title && IFS= read -r -d '' id && IFS= read -r -d '' priority; do
+        names+=("$title"); values+=("$id"); counts+=("$priority"); starts+=("$i")
+        i=$((i + priority))
+    done < <(jq -j '.[] | .name, "\u0000", .value, "\u0000", (.cards | length | tostring), "\u0000"' <<< "$model")
+    while IFS= read -r -d '' id && IFS= read -r -d '' title && IFS= read -r -d '' priority &&
+          IFS= read -r -d '' archived && IFS= read -r -d '' epic && IFS= read -r -d '' epic_title; do
+        ids+=("$id"); titles+=("${title:-Untitled}"); priorities+=("$priority"); archives+=("$archived")
+        epics+=("$epic"); epic_titles+=("$epic_title")
+    done < <(jq -j '.[] .cards[] | .attributes.id, "\u0000", .title, "\u0000", (.attributes.priority // "2"), "\u0000", (.archived | tostring), "\u0000", .epic_id, "\u0000", .epic_title, "\u0000"' <<< "$model")
+    (( column < ${#names[@]} )) || column=$((${#names[@]} - 1))
+    clamp_card
+    if [[ -n "$selected" ]]; then
+        for ((c=0; c<${#names[@]}; c++)); do
+            for ((i=0; i<counts[c]; i++)); do
+                if [[ "${ids[$((starts[c]+i))]}" == "$selected" ]]; then column=$c; card=$i; return 0; fi
+            done
+        done
+    fi
+    return 0
+}
+
+clamp_card() {
+    (( card < ${counts[column]:-0} )) || card=$(( ${counts[column]:-0} - 1 ))
+    (( card >= 0 )) || card=0
+}
+
+# Terminal state belongs to this process; cleanup is also safe after editor handoff.
+leave_terminal() {
+    if (( active )); then
+        stty "$saved_stty"
+        printf '%s%s' "$normal" "$cursor_on"
+        printf '%s' "$screen_off"
+        active=0
+    fi
+}
+enter_terminal() {
+    active=1
+    stty -echo -icanon -ixon min 1 time 0 susp undef || return 1
+    printf '%s%s' "$screen_on" "$cursor_off"
+    dirty=1
+}
+
+# Remove only the private snapshot created for the pager, including after signals.
+cleanup() {
+    leave_terminal
+    [[ -z "$detail_file" ]] || rm -f -- "$detail_file"
+}
+
+# Give the configured pager normal terminal input and a sanitized issue snapshot.
+show_details() {
+    local content pager="${PAGER:-}" status=0 default_pager=0
+    local pager_columns _pager_rows target_width
+    local -a pager_command=()
+    if [[ -z "$pager" ]]; then
+        default_pager=1
+        if command -v bat >/dev/null; then
+            pager=bat
+            pager_command=(bat --paging=always --language=markdown --style=plain --wrap=never
+                --pager 'less -R --wordwrap -+S'
+                --file-name "$(sanitize "$1").md")
+        else
+            pager=less
+            pager_command=(less -R --wordwrap -+S)
+        fi
+    elif [[ -x "$pager" && ! -d "$pager" ]]; then
+        pager_command=("$pager")
+    else
+        IFS=$' \t' read -r -a pager_command <<< "$pager"
+    fi
+    if [[ ${#pager_command[@]} == 0 ]] || ! command -v -- "${pager_command[0]}" >/dev/null; then
+        message="$(sanitize "Pager not found: $pager")"; return
+    fi
+    if ! content=$("$ISSUE" show "$1" 2>&1); then
+        message="$(sanitize "$content")"; return
+    fi
+    if ! detail_file=$(mktemp "${TMPDIR:-/tmp}/glo-board-details.XXXXXX"); then
+        message='Could not create a pager snapshot'; return
+    fi
+    if ! printf '%s\n' "$content" | jq -Rr 'gsub("[\u0000-\u0008\u000b-\u001f\u007f-\u009f]"; " ")' > "$detail_file"; then
+        rm -f -- "$detail_file"; detail_file=''
+        message='Could not prepare issue details'; return
+    fi
+    leave_terminal
+    if (( default_pager )); then
+        # Scope the width override to the viewer; 0 clears ambient fixed widths.
+        (
+            unset LESS_COLUMNS
+            if (( wrap_width > 0 )); then
+                read -r _pager_rows pager_columns <<< "$(stty size)"
+                if [[ "$pager_columns" =~ ^[1-9][0-9]*$ ]]; then
+                    target_width=$wrap_width
+                    (( target_width <= pager_columns )) || target_width=$pager_columns
+                    export LESS_COLUMNS=$target_width
+                fi
+            fi
+            exec "${pager_command[@]}" "$detail_file"
+        ) || status=$?
+    else
+        "${pager_command[@]}" "$detail_file" || status=$?
+    fi
+    rm -f -- "$detail_file"; detail_file=''
+    enter_terminal || exit 1
+    message='Pager closed'
+    (( status == 0 )) || message="Pager failed (exit $status)"
+    refresh || :
+}
+
+# Read complete terminal keys, consuming escape sequences so their tails cannot act.
+read_key() {
+    local char='' sequence='' n
+    key=''
+    IFS= read -rsn1 -t 0.2 char || return 0
+    case "$char" in
+        $'\033')
+            if IFS= read -rsn1 -t 0.04 char; then
+                sequence=$char
+                if [[ "$char" == '[' || "$char" == O ]]; then
+                    for ((n=0; n<16; n++)); do
+                        IFS= read -rsn1 -t 0.04 char || break
+                        sequence+=$char
+                        [[ "$char" == [a-zA-Z~] ]] && break
+                    done
+                fi
+                case "$sequence" in
+                    '[A'|OA) key=up ;; '[B'|OB) key=down ;;
+                    '[C'|OC) key=right ;; '[D'|OD) key=left ;;
+                esac
+            else key=escape; fi ;;
+        ''|$'\r') key=enter ;;
+        $'\177'|$'\010') key=backspace ;;
+        *) key=$char ;;
+    esac
+}
+
+# Append a clipped, positioned text fragment to one frame; never treat content as format.
+put() {
+    local row=$1 col=$2 width=$3 text=$4 style=${5:-} part
+    text=${text//[[:cntrl:]]/ }
+    printf -v part '\033[%d;%dH%s%-*s%s' "$row" "$col" "$style" "$width" "${text:0:width}" "$normal"
+    frame+=$part
+}
+
+# Populate card_title_lines, wrapping at words and splitting only oversized words.
+wrap_card_title() {
+    local width=$2 remaining piece next
+    local -a words=()
+    IFS=$' \t\n' read -r -a words <<< "$1"
+    remaining="${words[*]}"
+    card_title_lines=()
+    while [[ -n "$remaining" && ${#card_title_lines[@]} -lt 3 ]]; do
+        piece=${remaining:0:width}
+        next=${remaining:width:1}
+        if (( ${#remaining} > width )) && [[ "$next" != ' ' && "$piece" == *' '* ]]; then
+            piece=${piece% *}
+        fi
+        remaining=${remaining:${#piece}}
+        remaining=${remaining#"${remaining%%[![:space:]]*}"}
+        card_title_lines+=("${piece%"${piece##*[![:space:]]}"}")
+    done
+    if [[ -n "$remaining" ]]; then
+        piece=${card_title_lines[2]}
+        if (( ${#piece} >= width )); then
+            if [[ "$piece" == *' '* ]]; then piece=${piece% *}
+            else piece=${piece:0:width-1}; fi
+        fi
+        card_title_lines[2]="$piece…"
+    fi
+    (( ${#card_title_lines[@]} > 0 )) || card_title_lines=('Untitled')
+}
+
+render() {
+    local frame='' size start visible width c x row first i text available previous selected_end
+    local short_id prefix indent title_width title_line style icebox_state='' wrap_label=$wrap_width
+    local -a wrapped=() lines=() styles=() card_title_lines=()
+    size=$(stty size); read -r height columns <<< "$size"
+    height=${height:-24}; columns=${columns:-80}
+    (( height > 0 )) || height=24
+    (( columns > 0 )) || columns=80
+    frame=$clear
+    if (( height < 8 || columns < 20 )); then
+        put 1 1 "$columns" 'Resize terminal (20x8 minimum); q quits'
+        printf '%s' "$frame"; return
+    fi
+    if [[ "$group" == status ]]; then
+        icebox_state=' | icebox: hidden'
+        (( show_icebox )) && icebox_state=' | icebox: shown'
+    fi
+    (( wrap_width > 0 )) || wrap_label=auto
+    put 1 1 "$columns" "glo-board | $group | archive: $scope$icebox_state | wrap: $wrap_label | ${filter_values[*]:-no filters}" "$bold"
+    if [[ "$mode" != board ]]; then
+        for text in "${view[@]}"; do
+            while (( ${#text} > columns )); do
+                wrapped+=("${text:0:columns}"); text=${text:columns}
+            done
+            wrapped+=("$text")
+        done
+        available=$((height-4))
+        (( view_offset <= ${#wrapped[@]} - 1 )) || view_offset=$((${#wrapped[@]}-1))
+        (( view_offset >= 0 )) || view_offset=0
+        for ((row=0; row<available && row+view_offset<${#wrapped[@]}; row++)); do
+            put "$((row+2))" 1 "$columns" "${wrapped[row+view_offset]}"
+        done
+        put "$((height-1))" 1 "$columns" "$mode: j/k scroll | Escape/q return"
+    else
+        put 2 1 "$columns" 'g group c add column C auto | f filter F clear | v archives i icebox w wrap width'
+        visible=$((columns/28)); (( visible > 0 )) || visible=1
+        (( visible <= ${#names[@]} )) || visible=${#names[@]}
+        width=$((columns/visible))
+        start=$((column/visible*visible))
+        available=$((height-5))
+        for ((c=start; c<start+visible && c<${#names[@]}; c++)); do
+            x=$(((c-start)*width+1))
+            text="${names[c]} (${counts[c]})"
+            [[ $c == "$column" ]] && text="> $text"
+            put 3 "$x" "$((width-1))" "$text" "$bold"
+            lines=(); styles=(); previous=''; selected_end=0
+            for ((row=0; row<counts[c]; row++)); do
+                i=$((starts[c]+row))
+                if (( row == 0 )) || [[ "${epics[i]}" != "$previous" ]]; then
+                    lines+=("${epic_titles[i]}"); styles+=("$bold")
+                    previous=${epics[i]}
+                fi
+                short_id=${ids[i]}
+                (( ${#short_id} <= 4 )) || short_id=${short_id: -4}
+                prefix="$short_id P${priorities[i]} "
+                [[ "${archives[i]}" == true ]] && prefix+='[A] '
+                title_width=$((width-1-${#prefix}))
+                (( title_width > 0 )) || title_width=1
+                wrap_card_title "${titles[i]}" "$title_width"
+                printf -v indent '%*s' "${#prefix}" ''
+                style=''
+                if (( c == column && row == card )); then
+                    selected_end=$((${#lines[@]}+${#card_title_lines[@]})); style=$reverse
+                fi
+                for title_line in "${card_title_lines[@]}"; do
+                    lines+=("$prefix$title_line"); styles+=("$style"); prefix=$indent
+                done
+                lines+=(''); styles+=('')
+            done
+            first=0
+            if (( selected_end > available )); then first=$((selected_end-available)); fi
+            for ((row=0; row<available && row+first<${#lines[@]}; row++)); do
+                put "$((4+row))" "$x" "$((width-1))" "${lines[row+first]}" "${styles[row+first]}"
+            done
+        done
+        put "$((height-1))" 1 "$columns" 'arrows/hjkl | Enter details | m move n new s set e edit a archive r refresh ? help q quit'
+    fi
+    put "$height" 1 "$columns" "$message"
+    printf '%s' "$frame"
+}
+
+# Literal input prompt with cancellation, backspace and no shell interpretation.
+prompt() {
+    local label=$1
+    answer=''
+    dirty=1
+    while :; do
+        if (( dirty )); then message="$label$answer"; render; dirty=0; fi
+        read_key
+        [[ -n "$key" ]] || continue
+        dirty=1
+        case "$key" in
+            enter) message=''; return 0 ;;
+            escape) message='Cancelled'; return 1 ;;
+            backspace) answer=${answer%?} ;;
+            *) [[ ${#key} == 1 && ! "$key" =~ [[:cntrl:]] ]] && answer+=$key ;;
+        esac
+    done
+}
+
+# Apply view settings transactionally so invalid input retains the previous board.
+configure() {
+    local action=$1 old_group=$group old_scope=$scope old_icebox=$show_icebox value
+    local -a old_columns=("${explicit[@]}") old_filters=("${filter_values[@]}") updated=()
+    case "$action" in
+        w)
+            prompt 'Detail wrap width (0 = auto): ' || return
+            if set_wrap_width "$answer"; then message='View updated'
+            else message='Wrap width must be a nonnegative integer (0 = auto)'; fi
+            return ;;
+        g)
+            prompt 'Group by field (empty = status): ' || return
+            value=${answer:-status}
+            if [[ ! "$value" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then message='Invalid grouping field'; return; fi
+            case "$value" in deps|links|tags) message='Grouping requires a scalar field'; return ;; esac
+            group=$value; explicit=() ;;
+        c)
+            prompt 'Add column value (C resets): ' || return
+            if [[ -z "$answer" || "$answer" =~ ^\[.*\]$ ]]; then message='Column values must be nonempty scalars'; return; fi
+            if [[ "$group" == status ]]; then
+                case "$answer" in
+                    icebox) show_icebox=1 ;;
+                    open|in_progress|closed) ;;
+                    *) message='Status column must be open, in_progress, closed or icebox'; return ;;
+                esac
+            fi
+            explicit+=("$answer") ;;
+        C) explicit=() ;;
+        f)
+            prompt 'Filter key=value (F clears): ' || return
+            filter_values+=("$answer") ;;
+        F) filter_values=() ;;
+        v)
+            case "$scope" in active) scope=all ;; all) scope=archived ;; archived) scope=active ;; esac ;;
+        i)
+            if [[ "$group" != status ]]; then message='Icebox visibility applies to status grouping; use g to change groups'; return; fi
+            show_icebox=$((1-show_icebox))
+            if (( show_icebox )); then
+                (( ${#explicit[@]} == 0 )) || explicit=(icebox "${explicit[@]}")
+            else
+                for value in "${explicit[@]}"; do [[ "$value" == icebox ]] || updated+=("$value"); done
+                explicit=("${updated[@]}")
+            fi ;;
+    esac
+    if refresh; then
+        message='View updated'
+    else
+        group=$old_group; scope=$old_scope; show_icebox=$old_icebox
+        explicit=("${old_columns[@]}"); filter_values=("${old_filters[@]}")
+    fi
+}
+
+mutate() {
+    local result
+    if result=$("$ISSUE" "$@" 2>&1); then
+        message="$(sanitize "$result")"
+        refresh || :
+    else message="$(sanitize "$result")"; fi
+}
+
+move_card() {
+    local id=$1 destination=$column hint=''
+    dirty=1
+    while :; do
+        if (( dirty )); then
+            message="${hint:-Move $group to ${names[destination]}: arrows/hjkl choose, Enter apply, Escape cancel}"
+            render; dirty=0
+        fi
+        read_key
+        [[ -n "$key" ]] || continue
+        dirty=1; hint=''
+        case "$key" in
+            left|up|h|k) destination=$(((destination+${#names[@]}-1)%${#names[@]})) ;;
+            right|down|l|j) destination=$(((destination+1)%${#names[@]})) ;;
+            escape) message=Cancelled; return ;;
+            enter)
+                if [[ -n "${values[destination]}" ]]; then
+                    mutate set "$id" "$group=${values[destination]}"; return
+                fi
+                hint='Unassigned and Other are display buckets; use s to set an empty value'
+                ;;
+        esac
+    done
+}
+
+open_view() {
+    local content=$1 line
+    view=(); view_offset=0
+    while IFS= read -r line; do view+=("$line"); done < <(
+        printf '%s\n' "$content" | jq -Rr 'gsub("[\u0000-\u001f\u007f-\u009f]"; " ")'
+    )
+}
+
+# Validate the backend before taking over the terminal.
+refresh || { fail "$message"; exit 1; }
+saved_stty=$(stty -g) || exit 1
+if ! { screen_on=$(tput smcup) && screen_off=$(tput rmcup) && clear=$(tput clear) &&
+    cursor_on=$(tput cnorm) && cursor_off=$(tput civis) && normal=$(tput sgr0) &&
+    bold=$(tput bold) && reverse=$(tput rev); }; then
+    fail 'terminal capabilities unavailable'; exit 1
+fi
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+trap 'dirty=1' WINCH
+enter_terminal || exit 1
+while :; do
+    if (( dirty )); then render; dirty=0; fi
+    read_key
+    [[ -n "$key" ]] || continue
+    dirty=1
+    if [[ "$mode" != board ]]; then
+        case "$key" in
+            escape|q) mode=board ;;
+            down|j) view_offset=$((view_offset+1)) ;;
+            up|k) (( view_offset > 0 )) && view_offset=$((view_offset-1)) ;;
+        esac
+        continue
+    fi
+    selected=''
+    (( counts[column] > 0 )) && selected=${ids[$((starts[column]+card))]}
+    case "$key" in
+        q) break ;;
+        left|h) (( column > 0 )) && column=$((column-1)); clamp_card ;;
+        right|l) (( column+1 < ${#names[@]} )) && column=$((column+1)); clamp_card ;;
+        down|j) card=$((card+1)); clamp_card ;;
+        up|k) (( card > 0 )) && card=$((card-1)) ;;
+        r) message=Refreshed; refresh || : ;;
+        g|c|C|f|F|v|i|w) configure "$key" ;;
+        '?') mode=help; open_view "$(usage)" ;;
+        n) if prompt 'New title: ' && [[ -n "$answer" ]]; then mutate create -- "$answer"; fi ;;
+        enter|m|s|e|a)
+            if [[ -z "$selected" ]]; then message='No issue selected'; continue; fi
+            case "$key" in
+                enter) show_details "$selected" ;;
+                m) move_card "$selected" ;;
+                s) if prompt 'Set key=value: '; then mutate set "$selected" "$answer"; fi ;;
+                e)
+                    leave_terminal
+                    if "$ISSUE" edit "$selected"; then message='Editor closed'; else message='Editor failed'; fi
+                    enter_terminal || exit 1
+                    refresh || : ;;
+                a)
+                    action=archive
+                    [[ "${archives[$((starts[column]+card))]}" == true ]] && action=unarchive
+                    if prompt "$action $selected? [y/N] " && [[ "$answer" == [yY] ]]; then mutate "$action" "$selected"; fi ;;
+            esac ;;
+    esac
+done

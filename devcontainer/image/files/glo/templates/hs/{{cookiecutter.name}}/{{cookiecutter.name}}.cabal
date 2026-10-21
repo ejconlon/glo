@@ -3,17 +3,29 @@ name:          {{cookiecutter.name | replace("_", "-")}}
 version:       {{cookiecutter.version}}
 synopsis:      {{cookiecutter.description}}
 
+common defaults
+  default-language: GHC2024
+  default-extensions:
+      DerivingStrategies
+    , DerivingVia
+    , FunctionalDependencies
+    , LambdaCase
+    , OverloadedStrings
+    , PatternSynonyms
+    , TypeFamilies
+
 library
+  import: defaults
   exposed-modules: Lib
   hs-source-dirs:  src
-  default-language: GHC2021
   build-depends:   base ^>=4.22
 
 test-suite test
+  import: defaults
+  ghc-options:      -threaded -rtsopts
   type:             exitcode-stdio-1.0
   main-is:          Main.hs
   hs-source-dirs:   test
-  default-language: GHC2021
   build-depends:
       base ^>=4.22
     , {{cookiecutter.name | replace("_", "-")}}

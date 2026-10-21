@@ -45,10 +45,15 @@ step "Configurable notebook paths"
 python3 "${GLO_DIR}/test/base-path.py"
 ok "Configurable notebook paths"
 
+step "Kanban board CLI and terminal interactions"
+python3 "${GLO_DIR}/test/board.py"
+ok "Kanban board CLI and terminal interactions"
+
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"
 [[ -d bin ]]           && ok "bin/ created"
 [[ -x bin/glo-postgres ]] && ok "bin/glo-postgres created"
+[[ -x bin/glo-board ]] && bin/glo-board --help | grep -q 'Configure the board with keyboard controls' && ok "bin/glo-board created"
 bin/glo-postgres --help | grep -q 'POSTGRES_ENABLED=1' \
     && ok "bin/glo-postgres dispatches"
 [[ -d base/issue ]]    && ok "base/issue/ created"

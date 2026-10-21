@@ -39,6 +39,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         unzip \
         inotify-tools \
         jq \
+        less \
         pv \
         pkgconf-pkg-config \
         procps-ng \

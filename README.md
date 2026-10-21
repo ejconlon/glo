@@ -21,7 +21,7 @@ of Docker Buildx.
 directory (default `base/`), `.glo/build`, and a workspace `justfile`.
 
 Set `GLO_BASE` to use a different notebook directory for bootstrap and the
-issue, agent and notes commands:
+issue, board, agent and notes commands:
 
 ```sh
 export GLO_BASE=knowledge
@@ -46,6 +46,25 @@ If the workspace already has glo as a submodule:
 2. `./submodules/glo/bootstrap.sh`
 
 Run `glo readme` inside the devcontainer for the full tool reference.
+
+## Kanban Board
+
+Run `glo board` or `bin/glo-board` in an interactive terminal for a Bash Kanban
+UI backed by `glo-issue`. It supports status or scalar attribute columns,
+filters, issue details, moves, creation, editing and archive management.
+Within columns, tasks group under epics through explicit `parent` links;
+`deps` remain prerequisites and do not determine membership.
+Issue details open in `$PAGER`, or default to `bat` when available and `less`
+otherwise. The default viewer wraps at word boundaries through `less --wordwrap`,
+with bat supplying Markdown highlighting. Quit the pager to return to the board.
+Configure the board with keyboard controls: `g` changes the grouping field,
+`c` adds columns (`C` resets), and `f` adds filters (`F` clears). For an epic
+planning board, enter `plan` at the `g` prompt and `type=epic` at the `f` prompt.
+`v` cycles active/all/archived scope. Status boards hide icebox by default;
+`i` toggles it. Details default to a 120-column target, limited to the terminal
+width when opened. Use `glo board --wrap-width N` or `w` to change it; `0`
+uses automatic terminal width with live resizing. Other settings use keyboard
+controls and last for the current session. Run `glo board --help` for details.
 
 ## Optional PostgreSQL 18
 
