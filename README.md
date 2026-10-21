@@ -17,7 +17,26 @@ the platform default. The same selection is passed to the Dev Container CLI
 and all direct lifecycle commands; Podman builds use its native builder instead
 of Docker Buildx.
 
-`bootstrap.sh` creates the devcontainer config, `bin/glo*` wrappers, `base/`, `.glo/build`, and a workspace `justfile`.
+`bootstrap.sh` creates the devcontainer config, `bin/glo*` wrappers, the notebook
+directory (default `base/`), `.glo/build`, and a workspace `justfile`.
+
+Set `GLO_BASE` to use a different notebook directory for bootstrap and the
+issue, agent and notes commands:
+
+```sh
+export GLO_BASE=knowledge
+./submodules/glo/bootstrap.sh
+./bin/glo issue ls
+./bin/glo notes zk list
+```
+
+Relative paths resolve from the workspace root; absolute paths are supported.
+Unset or empty values select `<workspace>/base`. Bootstrap reads this value
+from its environment and does not save it in generated wrappers, so keep it
+exported for later commands. It creates `issue/`, `wiki/` and `.zk/` under the
+selected directory and adds its notebook database to the workspace's
+`.gitignore` when that directory is inside the workspace. Changing `GLO_BASE`
+selects another notebook; it does not move existing notes.
 
 ## Existing Workspace
 

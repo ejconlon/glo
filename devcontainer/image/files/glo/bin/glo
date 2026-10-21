@@ -30,7 +30,7 @@ Commands:
   gen        Generate a lib component from a template (glo-gen --help)
   garage     Run the optional Garage development object store
   local      Install host dependencies (glo-local --help)
-  notes      zk notebook wrapper for base/ (glo-notes --help)
+  notes      zk notebook wrapper for GLO_BASE (glo-notes --help)
   postgres   Disposable PostgreSQL 18 test cluster (when enabled)
   secrets    Manage a local KDBX database through SecretSpec
   readme     Print full documentation

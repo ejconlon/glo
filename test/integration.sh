@@ -16,6 +16,7 @@ rm -rf "$WORKSPACE"
 mkdir -p "$WORKSPACE/.git"
 cd "$WORKSPACE"
 # Workspace discovery only needs the marker; these tests perform no Git operations.
+unset GLO_BASE TICKETS_DIR ZK_NOTEBOOK_DIR
 export PATH="$WORKSPACE/bin:$PATH"
 
 # --- Optional tooling ---
@@ -40,6 +41,10 @@ step "Caddy tooling"
 ok "Caddy tooling"
 
 # --- Bootstrap ---
+step "Configurable notebook paths"
+python3 "${GLO_DIR}/test/base-path.py"
+ok "Configurable notebook paths"
+
 step "Bootstrap"
 "${GLO_DIR}/bootstrap.sh"
 [[ -d bin ]]           && ok "bin/ created"
@@ -83,6 +88,14 @@ bin/glo-build precommit
 ok "precommit"
 
 # --- glo-issue ---
+step "glo-issue: attribute filters and updates"
+python3 "${GLO_DIR}/test/issue-filters.py"
+ok "attribute filters and updates"
+
+step "glo-issue / glo-notes: archive and passthrough behavior"
+python3 "${GLO_DIR}/test/issue-archive.py"
+ok "archive and passthrough behavior"
+
 step "glo-issue: create"
 T1=$(bin/glo-issue create "Bootstrap ticket")
 T2=$(bin/glo-issue create "Second ticket")

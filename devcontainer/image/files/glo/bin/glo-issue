@@ -14,16 +14,13 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
+_GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=../lib/paths.sh
+source "${_GLO_BIN_DIR}/../lib/paths.sh"
+BASE_DIR="$(glo_base_dir "$WORKSPACE_DIR")"
 
-: "${TICKETS_DIR:=${WORKSPACE_DIR}/base/issue}"
-[[ -d "$TICKETS_DIR" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
-
-# Prefer ripgrep if available, fall back to grep
-if command -v rg &>/dev/null; then
-    _grep() { rg "$@"; }
-else
-    _grep() { grep "$@"; }
-fi
+: "${TICKETS_DIR:=${BASE_DIR}/issue}"
+[[ -d "$TICKETS_DIR" ]] || { echo "[E] Issue directory not found: $TICKETS_DIR - run bootstrap.sh first" >&2; exit 1; }
 
 # Portable sha256 (Linux: sha256sum, macOS: shasum -a 256)
 if command -v sha256sum &>/dev/null; then
@@ -35,14 +32,6 @@ fi
 # Portable ISO date (GNU date supports -Iseconds, BSD date does not)
 _iso_date() {
     date -u +%Y-%m-%dT%H:%M:%SZ
-}
-
-# Portable sed -i (BSD requires -i '', GNU uses -i)
-_sed_i() {
-    local file="$1"
-    shift
-    local tmp="${file}.tmp.$$"
-    sed "$@" "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
 # Generate ticket ID from title slug + short hash
@@ -72,13 +61,28 @@ ensure_dir() {
     mkdir -p "$TICKETS_DIR"
 }
 
-# Get ticket file path (supports partial ID matching)
+# Emit existing issue paths, NUL-delimited, without descending into other folders.
+ticket_files() {
+    local file directory
+    for directory in "$TICKETS_DIR" "$TICKETS_DIR/archive"; do
+        for file in "$directory"/*.md; do
+            [[ -f "$file" ]] || continue
+            case "${file##*/}" in TITLES.md|TAGS.md) continue ;; esac
+            printf '%s\0' "$file"
+        done
+    done
+}
+
+# Get a unique ticket path in either location, preferring exact to partial IDs.
 ticket_path() {
     local id="$1"
     local exact="$TICKETS_DIR/${id}.md"
     local archived_exact="$TICKETS_DIR/archive/${id}.md"
 
-    if [[ -f "$exact" ]]; then
+    if [[ -f "$exact" && -f "$archived_exact" ]]; then
+        echo "Error: duplicate ID '$id' exists in both active and archived issues" >&2
+        return 1
+    elif [[ -f "$exact" ]]; then
         echo "$exact"
         return 0
     fi
@@ -88,15 +92,17 @@ ticket_path() {
     fi
 
     # Try partial match in active and archived issues (anywhere in filename).
-    local matches
-    matches=$(find "$TICKETS_DIR" -maxdepth 2 -name "*${id}*.md" 2>/dev/null | head -2)
-    local count
-    count=$(echo "$matches" | _grep -c . || true)
+    local file name
+    local -a matches=()
+    while IFS= read -r -d '' file; do
+        name="${file##*/}"
+        [[ "${name%.md}" == *"$id"* ]] && matches+=("$file")
+    done < <(ticket_files)
 
-    if [[ "$count" -eq 1 ]]; then
-        echo "$matches"
+    if [[ ${#matches[@]} -eq 1 ]]; then
+        echo "${matches[0]}"
         return 0
-    elif [[ "$count" -gt 1 ]]; then
+    elif [[ ${#matches[@]} -gt 1 ]]; then
         echo "Error: ambiguous ID '$id' matches multiple tickets" >&2
         return 1
     else
@@ -105,32 +111,106 @@ ticket_path() {
     fi
 }
 
-# Extract YAML field value
+# Extract a field only from the leading frontmatter, never from body examples.
 yaml_field() {
-    local file="$1"
-    local field="$2"
-    sed -n '/^---$/,/^---$/p' "$file" | _grep "^${field}:" | sed "s/^${field}: *//"
+    GLO_ISSUE_FIELD="$2" awk '
+        FNR == 1 { if ($0 != "---") exit; next }
+        /^---$/ { exit }
+        {
+            colon = index($0, ":")
+            if (substr($0, 1, colon - 1) == ENVIRON["GLO_ISSUE_FIELD"]) {
+                value = substr($0, colon + 1)
+                sub(/^[ \t]+/, "", value)
+                print value
+                found = 1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$1"
 }
 
-# Update YAML field
-update_yaml_field() {
-    local file="$1"
-    local field="$2"
-    local value="$3"
-
-    local replacement="${field}:"
-    [[ -n "$value" ]] && replacement="${field}: ${value}"
-
-    if _grep -q "^${field}:" "$file"; then
-        _sed_i "$file" "s/^${field}:.*/${replacement}/"
-    else
-        # Insert before closing --- (bottom of frontmatter)
-        local tmp="${file}.tmp.$$"
-        awk -v new_line="$replacement" '
-        /^---$/ && ++n == 2 { print new_line }
-        { print }
-        ' "$file" > "$tmp" && mv "$tmp" "$file"
+# Validate the flat attribute assignments shared by issue mutations.
+validate_attribute_assignment() {
+    local expression="$1"
+    if [[ ! "$expression" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*= || "$expression" == *$'\n'* || "$expression" == *$'\r'* ]]; then
+        echo "Error: invalid attribute assignment '$expression'; expected key=value on one line" >&2
+        return 1
     fi
+}
+
+# Update fields together, preserving the rest of the document and file mode.
+update_yaml_fields() {
+    local file="$1"
+    shift
+    local expression
+    local -x GLO_ISSUE_UPDATES=""
+    for expression in "$@"; do
+        validate_attribute_assignment "$expression" || return 1
+        GLO_ISSUE_UPDATES+="${GLO_ISSUE_UPDATES:+$'\n'}$expression"
+    done
+
+    local tmp
+    tmp=$(mktemp "${file}.tmp.XXXXXX") || return 1
+    # Read the document as one record so the body, including its final newline
+    # or lack of one, survives exactly. Environment values are never awk code.
+    if cp -p -- "$file" "$tmp" && awk '
+        BEGIN {
+            RS="\0"
+            n = split(ENVIRON["GLO_ISSUE_UPDATES"], assignments, "\n")
+            for (i = 1; i <= n; i++) {
+                at = index(assignments[i], "=")
+                key = substr(assignments[i], 1, at - 1)
+                if (!(key in updates)) order[++count] = key
+                updates[key] = substr(assignments[i], at + 1)
+            }
+        }
+        {
+            n = split($0, lines, "\n")
+            closing = 0
+            if (lines[1] == "---") {
+                for (i = 2; i <= n; i++) {
+                    if (lines[i] == "---") { closing = i; break }
+                }
+            }
+            if (NR != 1 || !closing) {
+                print "Error: issue must have a complete leading frontmatter block" > "/dev/stderr"
+                exit 1
+            }
+            printf "---\n"
+            for (i = 2; i < closing; i++) {
+                key = substr(lines[i], 1, index(lines[i], ":") - 1)
+                if (key in updates) {
+                    if (!(key in written)) write_field(key)
+                } else printf "%s\n", lines[i]
+            }
+            for (i = 1; i <= count; i++) {
+                key = order[i]
+                if (!(key in written)) write_field(key)
+            }
+            printf "---"
+            for (i = closing + 1; i <= n; i++) printf "\n%s", lines[i]
+        }
+        END {
+            if (NR == 0) {
+                print "Error: issue is empty" > "/dev/stderr"
+                exit 1
+            }
+        }
+        function write_field(key) {
+            printf "%s:%s%s\n", key, (updates[key] == "" ? "" : " "), updates[key]
+            written[key] = 1
+        }
+    ' "$file" > "$tmp" && mv -- "$tmp" "$file"; then
+        return 0
+    fi
+    rm -f -- "$tmp"
+    return 1
+}
+
+# Existing lifecycle and relationship commands use the same literal writer.
+update_yaml_field() {
+    update_yaml_fields "$1" "$2=$3"
 }
 
 cmd_create() {
@@ -236,17 +316,7 @@ cmd_status() {
     local file
     file=$(ticket_path "$id") || return 1
 
-    update_yaml_field "$file" "status" "$status"
-    if [[ "$file" == "$TICKETS_DIR/archive/"* \
-        && ( "$status" == "open" || "$status" == "in_progress" ) ]]; then
-        local active_file="$TICKETS_DIR/$(basename "$file")"
-        if [[ -e "$active_file" ]]; then
-            echo "Error: cannot resume archived issue; active file already exists: $active_file" >&2
-            return 1
-        fi
-        mv "$file" "$active_file"
-        file="$active_file"
-    fi
+    cmd_set "$id" "status=$status" >/dev/null || return 1
     echo "Updated $(basename "$file" .md) -> $status"
 }
 
@@ -282,6 +352,43 @@ cmd_reopen() {
     cmd_status "$1" "open"
 }
 
+# Move storage location without changing status or overwriting another issue.
+cmd_archive_location() {
+    local action="$1"
+    shift
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: $(basename "$0") $action <id>" >&2
+        return 1
+    fi
+    local file destination status
+    file=$(ticket_path "$1") || return 1
+    if [[ "$action" == "archive" ]]; then
+        status=$(yaml_field "$file" status)
+        if [[ "$status" != "closed" && "$status" != "icebox" ]]; then
+            echo "Error: only closed or iceboxed issues can be archived; close or icebox the issue first" >&2
+            return 1
+        fi
+        destination="$TICKETS_DIR/archive/$(basename "$file")"
+    else
+        destination="$TICKETS_DIR/$(basename "$file")"
+    fi
+    if [[ "$destination" == "$file" ]]; then
+        echo "Issue is already in the requested location: $(basename "$file" .md)"
+        return 0
+    fi
+    if [[ -e "$destination" ]]; then
+        echo "Error: destination already exists: $destination" >&2
+        return 1
+    fi
+    mkdir -p -- "$(dirname "$destination")"
+    mv -n -- "$file" "$destination" || return 1
+    if [[ -e "$file" ]]; then
+        echo "Error: issue was not moved; destination already exists: $destination" >&2
+        return 1
+    fi
+    echo "${action}: $(basename "$destination" .md)"
+}
+
 cmd_dep_tree() {
     local full_mode=0
     local root_id=""
@@ -298,14 +405,22 @@ cmd_dep_tree() {
         return 1
     fi
 
-    awk -v root_pattern="$root_id" -v full_mode="$full_mode" '
+    local file
+    file=$(ticket_path "$root_id") || return 1
+    root_id=$(basename "$file" .md)
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+
+    awk -v root="$root_id" -v full_mode="$full_mode" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^deps:/ {
@@ -328,19 +443,8 @@ cmd_dep_tree() {
 
     END {
         if (prev_file) store()
-        # Resolve partial ID
-        root = ""
-        for (id in statuses) {
-            if (index(id, root_pattern) > 0) {
-                if (root != "") {
-                    print "Error: ambiguous ID " root_pattern > "/dev/stderr"
-                    exit 1
-                }
-                root = id
-            }
-        }
-        if (root == "") {
-            print "Error: ticket " root_pattern " not found" > "/dev/stderr"
+        if (!(root in statuses)) {
+            print "Error: ticket " root " has no issue metadata" > "/dev/stderr"
             exit 1
         }
 
@@ -478,11 +582,18 @@ cmd_dep_tree() {
             print_stack_path[print_sp] = path
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
 }
 
 cmd_dep_cycle() {
     [[ ! -d "$TICKETS_DIR" ]] && return 0
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+    if [[ ${#files[@]} -eq 0 ]]; then
+        echo "No dependency cycles found"
+        return 0
+    fi
 
     awk '
     BEGIN { FS=": "; in_front=0 }
@@ -490,8 +601,10 @@ cmd_dep_cycle() {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^deps:/ {
@@ -591,7 +704,7 @@ cmd_dep_cycle() {
             }
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
 }
 
 cmd_dep() {
@@ -616,32 +729,114 @@ cmd_dep() {
 
     local id="$1"
     local dep_id="$2"
-    local file
+    local file dep_file
     file=$(ticket_path "$id") || return 1
 
-    # Verify dependency exists
-    ticket_path "$dep_id" >/dev/null || return 1
+    # Store the full ID so relationships survive partial-ID input and archival.
+    dep_file=$(ticket_path "$dep_id") || return 1
+    dep_id=$(basename "$dep_file" .md)
 
     # Get current deps
     local current_deps
-    current_deps=$(yaml_field "$file" "deps")
+    current_deps=$(yaml_field "$file" "deps" || true)
 
     # Add dep if not already present
-    if echo "$current_deps" | _grep -q "$dep_id"; then
+    if relation_contains "$current_deps" "$dep_id"; then
         echo "Dependency already exists"
         return 0
     fi
 
     # Update deps array
-    if [[ "$current_deps" == "[]" ]]; then
-        update_yaml_field "$file" "deps" "[$dep_id]"
-    else
-        local new_deps
-        new_deps="${current_deps/]/, $dep_id]}"
-        update_yaml_field "$file" "deps" "$new_deps"
-    fi
+    update_yaml_field "$file" "deps" "$(relation_update "$current_deps" "$dep_id" add)" || return 1
 
     echo "Added dependency: $(basename "$file" .md) -> $dep_id"
+}
+
+# Extract shared attribute and archive filters before command-specific options. Values go
+# through the environment, never through awk source or escape-processing -v.
+cmd_filtered_list() {
+    local command="$1"
+    shift
+    local -a arguments=()
+    local expression
+    local -x GLO_ISSUE_FILTERS=""
+    local -x GLO_ISSUE_ARCHIVE_SCOPE="active"
+    local -x GLO_ISSUE_ARCHIVE_DIR="$TICKETS_DIR/archive/"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --with-archived|--only-archived)
+                local scope="all"
+                [[ "$1" == "--only-archived" ]] && scope="archived"
+                if [[ "$GLO_ISSUE_ARCHIVE_SCOPE" != "active" && "$GLO_ISSUE_ARCHIVE_SCOPE" != "$scope" ]]; then
+                    echo "Error: --with-archived and --only-archived cannot be combined" >&2
+                    return 1
+                fi
+                GLO_ISSUE_ARCHIVE_SCOPE="$scope"
+                shift
+                continue
+                ;;
+            -f|--filter)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: $1 requires key=value" >&2
+                    return 1
+                fi
+                expression="$2"
+                shift 2
+                ;;
+            --filter=*) expression="${1#--filter=}"; shift ;;
+            *) arguments+=("$1"); shift; continue ;;
+        esac
+        if [[ ! "$expression" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*= || "$expression" == *$'\n'* || "$expression" == *$'\r'* ]]; then
+            echo "Error: invalid filter '$expression'; expected key=value on one line" >&2
+            return 1
+        fi
+        GLO_ISSUE_FILTERS+="${GLO_ISSUE_FILTERS:+$'\n'}$expression"
+    done
+
+    # Each listing awk program appends its own rendering rules. Index fields by
+    # filename so emitting the previous record and retaining all dependency
+    # statuses cannot be affected by the next record or by candidate filters.
+    local filter_awk
+    filter_awk=$(cat <<'AWK'
+    BEGIN { filter_count = split(ENVIRON["GLO_ISSUE_FILTERS"], filters, "\n") }
+    FNR == 1 { filter_front = ($0 == "---") }
+    FNR > 1 && /^---$/ { filter_front = 0 }
+    filter_front && FNR > 1 && /^[a-zA-Z_][a-zA-Z0-9_-]*:/ {
+        filter_colon = index($0, ":")
+        filter_key = substr($0, 1, filter_colon - 1)
+        filter_fields[FILENAME, filter_key] = filter_trim(substr($0, filter_colon + 1))
+    }
+    function filter_trim(value) {
+        sub(/^[ \t]+/, "", value)
+        sub(/[ \t\r]+$/, "", value)
+        return value
+    }
+    function filter_matches(file,    i, at, key, expected, value, n, j, items, found, archived, scope) {
+        archived = (index(file, ENVIRON["GLO_ISSUE_ARCHIVE_DIR"]) == 1)
+        scope = ENVIRON["GLO_ISSUE_ARCHIVE_SCOPE"]
+        if (scope == "active" && archived) return 0
+        if (scope == "archived" && !archived) return 0
+        for (i = 1; i <= filter_count; i++) {
+            at = index(filters[i], "=")
+            key = substr(filters[i], 1, at - 1)
+            expected = substr(filters[i], at + 1)
+            if (!((file SUBSEP key) in filter_fields)) return 0
+            value = filter_fields[file, key]
+            if (value ~ /^\[.*\]$/) {
+                n = split(substr(value, 2, length(value) - 2), items, ",")
+                found = 0
+                for (j = 1; j <= n; j++) {
+                    value = filter_trim(items[j])
+                    if (value != "" && ("x" value) == ("x" expected)) found = 1
+                }
+                if (!found) return 0
+            } else if (("x" value) != ("x" expected)) return 0
+        }
+        return 1
+    }
+AWK
+)
+    "cmd_$command" "${arguments[@]}"
 }
 
 cmd_ls() {
@@ -655,18 +850,25 @@ cmd_ls() {
             --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
+            *) echo "Error: unexpected argument '$1'" >&2; return 1 ;;
         esac
     done
 
-    awk -v status_filter="$status_filter" -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+    [[ ${#files[@]} -gt 0 ]] || return 0
+
+    awk -v status_filter="$status_filter" -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" "$filter_awk"'
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
         id=""; status=""; title=""; deps=""; assignee=""; tags=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^assignee:/ { assignee = $2 }
@@ -683,14 +885,14 @@ cmd_ls() {
         return 0
     }
     function emit() {
-        if (id != "" && (status_filter == "" || status == status_filter) && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && filter_matches(prev_file) && (status_filter == "" || status == status_filter) && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
             deps_display = (deps != "") ? "[" deps "]" : "[]"
             gsub(/,/, ", ", deps_display)
             dep_str = (deps_display != "[]") ? " <- " deps_display : ""
             printf "%-35s [%s] - %s%s\n", id, status, title, dep_str
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
 }
 
 cmd_ready() {
@@ -703,18 +905,25 @@ cmd_ready() {
             --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
+            *) echo "Error: unexpected argument '$1'" >&2; return 1 ;;
         esac
     done
 
-    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+    [[ ${#files[@]} -gt 0 ]] || return 0
+
+    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" "$filter_awk"'
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; priority=""; assignee=""; tags=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
@@ -732,6 +941,7 @@ cmd_ready() {
     }
     function store() {
         if (id != "") {
+            matches[id] = filter_matches(prev_file)
             statuses[id] = status
             titles[id] = title
             deps_raw[id] = deps
@@ -744,6 +954,7 @@ cmd_ready() {
         if (prev_file) store()
         # Find ready tickets: active with all deps closed
         for (id in statuses) {
+            if (!matches[id]) continue
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
             if (assignee_filter != "" && assignees[id] != assignee_filter) continue
@@ -782,7 +993,7 @@ cmd_ready() {
             printf "%-35s [P%s][%s] - %s\n", f[2], f[1], f[3], f[4]
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
 }
 
 cmd_closed() {
@@ -796,24 +1007,33 @@ cmd_closed() {
             --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
+            *) echo "Error: unexpected argument '$1'" >&2; return 1 ;;
         esac
     done
 
-    # List files by mtime (most recent first), filter closed, limit output
-    local -a files=()
-    while IFS= read -r -d '' f; do
-        files+=("$f")
-    done < <(find "$TICKETS_DIR" -maxdepth 1 -name "*.md" -printf '%T@\t%p\0' 2>/dev/null | sort -z -t$'\t' -k1,1rn | cut -z -f2 | head -z -n 100)
-    [[ ${#files[@]} -eq 0 ]] && return 0
-    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    if [[ ! "$limit" =~ ^[0-9]+$ ]]; then
+        echo "Error: --limit requires a nonnegative integer" >&2
+        return 1
+    fi
+
+    # List all files by mtime, then filter before applying the result limit.
+    local file
+    local -a candidates=() files=()
+    while IFS= read -r -d '' file; do candidates+=("$file"); done < <(ticket_files)
+    [[ ${#candidates[@]} -gt 0 ]] || return 0
+    while IFS= read -r -d '' file; do
+        files+=("$file")
+    done < <(find "${candidates[@]}" -maxdepth 0 -printf '%T@\t%p\0' | sort -z -t$'\t' -k1,1rn | cut -z -f2)
+    awk -v limit="$limit" -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" "$filter_awk"'
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
         id=""; status=""; title=""; assignee=""; tags=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^assignee:/ { assignee = $2 }
@@ -825,15 +1045,15 @@ cmd_closed() {
         return 0
     }
     function emit() {
-        if (id != "" && (status == "closed" || status == "done") && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && filter_matches(prev_file) && (status == "closed" || status == "done") && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
             output[++count] = sprintf("%-35s [%s] - %s", id, status, title)
         }
     }
     END {
         if (prev_file) emit()
-        for (i = 1; i <= count; i++) print output[i]
+        for (i = 1; i <= count && i <= limit; i++) print output[i]
     }
-    ' "${files[@]}" | head -n "$limit"
+    ' "${files[@]}"
 }
 
 cmd_blocked() {
@@ -846,18 +1066,25 @@ cmd_blocked() {
             --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
+            *) echo "Error: unexpected argument '$1'" >&2; return 1 ;;
         esac
     done
 
-    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+    [[ ${#files[@]} -gt 0 ]] || return 0
+
+    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" "$filter_awk"'
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; priority=""; assignee=""; tags=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
@@ -875,6 +1102,7 @@ cmd_blocked() {
     }
     function store() {
         if (id != "") {
+            matches[id] = filter_matches(prev_file)
             statuses[id] = status
             titles[id] = title
             deps_raw[id] = deps
@@ -887,6 +1115,7 @@ cmd_blocked() {
         if (prev_file) store()
         # Find blocked tickets: active with at least one dep not closed
         for (id in statuses) {
+            if (!matches[id]) continue
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
             if (assignee_filter != "" && assignees[id] != assignee_filter) continue
@@ -934,128 +1163,98 @@ cmd_blocked() {
             printf "%-35s [P%s][%s] - %s <- %s\n", f[2], f[1], f[3], f[4], f[5]
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
+}
+
+# Parse the issue format's inline ID lists without substring or regex matching.
+relation_members() {
+    local value="${1#\[}" member
+    value="${value%\]}"
+    local -a members=()
+    IFS=',' read -r -a members <<< "$value"
+    for member in "${members[@]}"; do
+        member="${member#"${member%%[![:space:]]*}"}"
+        member="${member%"${member##*[![:space:]]}"}"
+        [[ -n "$member" ]] && printf '%s\n' "$member"
+    done
+    return 0
+}
+
+# Test a whole relationship ID, including when another ID contains it.
+relation_contains() {
+    local member
+    while IFS= read -r member; do
+        [[ "$member" == "$2" ]] && return 0
+    done < <(relation_members "$1")
+    return 1
+}
+
+# Render a list after adding or removing one full ID, preserving other members.
+relation_update() {
+    local value="$1" target="$2" action="$3" member result="" found=false
+    while IFS= read -r member; do
+        if [[ "$member" == "$target" ]]; then
+            found=true
+            [[ "$action" == "remove" ]] && continue
+        fi
+        result+="${result:+, }$member"
+    done < <(relation_members "$value")
+    if [[ "$action" == "add" && "$found" == false ]]; then
+        result+="${result:+, }$target"
+    fi
+    printf '[%s]\n' "$result"
 }
 
 cmd_undep() {
-    if [[ $# -lt 2 ]]; then
-        echo "Usage: ticket undep <id> <dependency-id>" >&2
+    if [[ $# -ne 2 ]]; then
+        echo "Usage: glo-issue undep <id> <dependency-id>" >&2
         return 1
     fi
-
-    local id="$1"
-    local dep_id="$2"
-    local file
-    file=$(ticket_path "$id") || return 1
-
-    local current_deps
-    current_deps=$(yaml_field "$file" "deps")
-
-    if ! echo "$current_deps" | _grep -q "$dep_id"; then
-        echo "Dependency not found"
+    local file dep_file dep_id="$2" current_deps
+    file=$(ticket_path "$1") || return 1
+    current_deps=$(yaml_field "$file" deps || true)
+    # An exact stored ID can be removed even if the target file is missing.
+    if ! relation_contains "$current_deps" "$dep_id"; then
+        dep_file=$(ticket_path "$dep_id") || return 1
+        dep_id=$(basename "$dep_file" .md)
+    fi
+    if ! relation_contains "$current_deps" "$dep_id"; then
+        echo "Dependency not found" >&2
         return 1
     fi
-
-    # Remove dep from array
-    local new_deps
-    new_deps=$(echo "$current_deps" | sed "s/, *$dep_id//g; s/$dep_id, *//g; s/$dep_id//g")
-    # Clean up empty array case
-    [[ "$new_deps" == "[]" || "$new_deps" == "[, ]" || "$new_deps" == "[ ]" ]] && new_deps="[]"
-
-    update_yaml_field "$file" "deps" "$new_deps"
+    update_yaml_field "$file" deps "$(relation_update "$current_deps" "$dep_id" remove)" || return 1
     echo "Removed dependency: $(basename "$file" .md) -/-> $dep_id"
-}
-
-add_link_to_file() {
-    local file="$1"
-    local target_id="$2"
-
-    local current_links
-    current_links=$(yaml_field "$file" "links" || true)
-    [[ -z "$current_links" ]] && current_links="[]"
-
-    # Skip if already present
-    if echo "$current_links" | _grep -q "$target_id"; then
-        return 0
-    fi
-
-    if [[ "$current_links" == "[]" ]]; then
-        update_yaml_field "$file" "links" "[$target_id]"
-    else
-        local new_links
-        new_links="${current_links/]/, $target_id]}"
-        update_yaml_field "$file" "links" "$new_links"
-    fi
 }
 
 cmd_link() {
     if [[ $# -lt 2 ]]; then
-        echo "Usage: ticket link <id> <id> [id...]" >&2
+        echo "Usage: glo-issue link <id> <id> [id...]" >&2
         return 1
     fi
-
-    # Resolve all ticket paths first
+    # Resolve every endpoint before changing any file, including archive paths.
     local -a ids=() files=()
+    local arg file self target current_links updated i count=0
     for arg in "$@"; do
-        local file
         file=$(ticket_path "$arg") || return 1
         ids+=("$(basename "$file" .md)")
         files+=("$file")
     done
-
-    local count=0
     for ((i=0; i<${#ids[@]}; i++)); do
-        local file="${files[$i]}"
-        local self="${ids[$i]}"
-
-        # Build list of other IDs to link
-        local others=""
-        for ((j=0; j<${#ids[@]}; j++)); do
-            [[ $i -ne $j ]] && others="$others ${ids[$j]}"
+        file="${files[$i]}"
+        self="${ids[$i]}"
+        current_links=$(yaml_field "$file" links || true)
+        updated="${current_links:-[]}"
+        for target in "${ids[@]}"; do
+            [[ "$target" == "$self" ]] && continue
+            if ! relation_contains "$updated" "$target"; then
+                updated=$(relation_update "$updated" "$target" add)
+                count=$((count + 1))
+            fi
         done
-
-        # Update file with awk - add missing links
-        local result
-        result=$(awk -v self="$self" -v others="$others" '
-        BEGIN {
-            n = split(others, other_arr, " ")
-            for (i = 1; i <= n; i++) need[other_arr[i]] = 1
-        }
-        /^links:/ {
-            # Parse existing links
-            gsub(/[\[\]]/, "", $0)
-            sub(/^links: */, "", $0)
-            m = split($0, existing, ", *")
-            for (i = 1; i <= m; i++) {
-                if (existing[i] != "") {
-                    have[existing[i]] = 1
-                    delete need[existing[i]]
-                }
-            }
-
-            # Build new links array
-            out = ""
-            for (i = 1; i <= m; i++) {
-                if (existing[i] != "") {
-                    out = (out == "") ? existing[i] : out ", " existing[i]
-                }
-            }
-            for (id in need) {
-                out = (out == "") ? id : out ", " id
-                added++
-            }
-            print "links: [" out "]"
-            found = 1
-            next
-        }
-        { print }
-        END { printf "%d", added > "/dev/stderr" }
-        ' "$file" 2>&1 >"${file}.tmp")
-
-        mv "${file}.tmp" "$file"
-        ((count += result)) || true
+        if [[ "$updated" != "${current_links:-[]}" ]]; then
+            update_yaml_field "$file" links "$updated" || return 1
+        fi
     done
-
     if [[ $count -eq 0 ]]; then
         echo "All links already exist"
     else
@@ -1063,50 +1262,25 @@ cmd_link() {
     fi
 }
 
-remove_link_from_file() {
-    local file="$1"
-    local target_id="$2"
-
-    local current_links
-    current_links=$(yaml_field "$file" "links" || true)
-
-    # Skip if not present
-    if [[ -z "$current_links" ]] || ! echo "$current_links" | _grep -q "$target_id"; then
-        return 0
-    fi
-
-    local new_links
-    new_links=$(echo "$current_links" | sed "s/, *$target_id//g; s/$target_id, *//g; s/$target_id//g")
-    [[ "$new_links" == "[]" || "$new_links" == "[, ]" || "$new_links" == "[ ]" ]] && new_links="[]"
-
-    update_yaml_field "$file" "links" "$new_links"
-}
-
 cmd_unlink() {
-    if [[ $# -lt 2 ]]; then
-        echo "Usage: ticket unlink <id> <target-id>" >&2
+    if [[ $# -ne 2 ]]; then
+        echo "Usage: glo-issue unlink <id> <target-id>" >&2
         return 1
     fi
-
-    local id="$1"
-    local target_id="$2"
-    local file target_file
-    file=$(ticket_path "$id") || return 1
-    target_file=$(ticket_path "$target_id") || return 1
-
-    local current_links
-    current_links=$(yaml_field "$file" "links" || true)
-
-    if [[ -z "$current_links" ]] || ! echo "$current_links" | _grep -q "$target_id"; then
-        echo "Link not found"
+    local file target_file id target_id current_links target_links
+    file=$(ticket_path "$1") || return 1
+    target_file=$(ticket_path "$2") || return 1
+    id=$(basename "$file" .md)
+    target_id=$(basename "$target_file" .md)
+    current_links=$(yaml_field "$file" links || true)
+    target_links=$(yaml_field "$target_file" links || true)
+    if ! relation_contains "$current_links" "$target_id" && ! relation_contains "$target_links" "$id"; then
+        echo "Link not found" >&2
         return 1
     fi
-
-    # Remove from both files
-    remove_link_from_file "$file" "$target_id"
-    remove_link_from_file "$target_file" "$id"
-
-    echo "Removed link: $(basename "$file" .md) <-> $target_id"
+    update_yaml_field "$file" links "$(relation_update "$current_links" "$target_id" remove)" || return 1
+    update_yaml_field "$target_file" links "$(relation_update "$target_links" "$id" remove)" || return 1
+    echo "Removed link: $id <-> $target_id"
 }
 
 cmd_show() {
@@ -1119,6 +1293,9 @@ cmd_show() {
     file=$(ticket_path "$1") || return 1
     local target_id
     target_id=$(basename "$file" .md)
+    local candidate
+    local -a files=()
+    while IFS= read -r -d '' candidate; do files+=("$candidate"); done < <(ticket_files)
 
     awk -v target="$target_id" -v target_file="$file" '
     BEGIN { FS=": "; in_front=0 }
@@ -1128,8 +1305,10 @@ cmd_show() {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; links=""; parent=""; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
+    /^---$/ { in_front = 0; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^deps:/ { deps = $2; gsub(/[\[\] ]/, "", deps) }
@@ -1162,7 +1341,7 @@ cmd_show() {
             if (deps != "") {
                 n = split(deps, arr, ",")
                 for (i = 1; i <= n; i++) {
-                    if (arr[i] == target && statuses[id] != "closed") {
+                    if (arr[i] == target && statuses[id] != "closed" && statuses[target] != "closed") {
                         blocking_count++
                         blocking[blocking_count] = id
                     }
@@ -1251,7 +1430,7 @@ cmd_show() {
             }
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${files[@]}"
 }
 
 cmd_add_note() {
@@ -1305,28 +1484,49 @@ cmd_edit() {
 cmd_query() {
     [[ ! -d "$TICKETS_DIR" ]] && return 0
 
+    if [[ $# -gt 1 || "${1:-}" == -* ]]; then
+        echo "Usage: glo-issue query [--filter key=value]... [jq-filter]" >&2
+        return 1
+    fi
     local filter="${1:-}"
+    local file
+    local -a files=()
+    while IFS= read -r -d '' file; do files+=("$file"); done < <(ticket_files)
+    [[ ${#files[@]} -gt 0 ]] || return 0
 
     # Generate all JSON in one awk pass
     local json_output
-    json_output=$(awk '
+    json_output=$(awk "$filter_awk"'
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
         field_count=0; in_front=0
         prev_file=FILENAME
+        in_front=($0 == "---")
+        next
     }
-    /^---$/ { in_front = !in_front; next }
-    in_front && /^[a-zA-Z]/ {
-        key = $1
-        val = substr($0, length($1) + 3)
-        gsub(/^ +| +$/, "", val)
+    /^---$/ { in_front = 0; next }
+    in_front && /^[a-zA-Z_][a-zA-Z0-9_-]*:/ {
+        colon = index($0, ":")
+        key = substr($0, 1, colon - 1)
+        val = filter_trim(substr($0, colon + 1))
         field_count++
         field_keys[field_count] = key
         field_vals[field_count] = val
     }
+    function json_string(value,    result, i, c) {
+        result = "\""
+        for (i = 1; i <= length(value); i++) {
+            c = substr(value, i, 1)
+            if (c == "\\" || c == "\"") result = result "\\" c
+            else if (c == "\t") result = result "\\t"
+            else if (c == "\r") result = result "\\r"
+            else result = result c
+        }
+        return result "\""
+    }
     function emit() {
-        if (field_count > 0) {
+        if (field_count > 0 && filter_matches(prev_file)) {
             printf "{"
             for (i = 1; i <= field_count; i++) {
                 if (i > 1) printf ","
@@ -1336,28 +1536,79 @@ cmd_query() {
                 if (val ~ /^\[.*\]$/) {
                     gsub(/^\[|\]$/, "", val)
                     n = split(val, items, ", *")
-                    printf "\"%s\":[", key
+                    printf "%s:[", json_string(key)
                     for (j = 1; j <= n; j++) {
                         if (j > 1) printf ","
                         gsub(/^ +| +$/, "", items[j])
-                        if (items[j] != "") printf "\"%s\"", items[j]
+                        if (items[j] != "") printf "%s", json_string(items[j])
                     }
                     printf "]"
                 } else {
-                    printf "\"%s\":\"%s\"", key, val
+                    printf "%s:%s", json_string(key), json_string(val)
                 }
             }
             printf "}\n"
         }
     }
     END { if (prev_file) emit() }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null)
+    ' "${files[@]}")
 
+    [[ -n "$json_output" ]] || return 0
     if [[ -n "$filter" ]]; then
         echo "$json_output" | jq -c "select($filter)"
     else
         echo "$json_output"
     fi
+}
+
+# Set ordinary attributes; retain lifecycle behavior and graph invariants.
+cmd_set() {
+    if [[ $# -lt 2 ]]; then
+        echo "Usage: $(basename "$0") set <id> key=value [key=value ...]" >&2
+        return 1
+    fi
+    local id="$1"
+    shift
+    local expression key value status=""
+    for expression in "$@"; do
+        validate_attribute_assignment "$expression" || return 1
+        key="${expression%%=*}"
+        value="${expression#*=}"
+        case "$key" in
+            id)
+                echo "Error: issue IDs cannot be changed" >&2
+                return 1
+                ;;
+            deps|links)
+                echo "Error: use dep/undep or link/unlink to change $key" >&2
+                return 1
+                ;;
+            status)
+                validate_status "$value" || return 1
+                status="$value"
+                ;;
+        esac
+    done
+
+    local file destination
+    file=$(ticket_path "$id") || return 1
+    destination="$file"
+    if [[ "$file" == "$TICKETS_DIR/archive/"* \
+        && ( "$status" == "open" || "$status" == "in_progress" ) ]]; then
+        destination="$TICKETS_DIR/$(basename "$file")"
+        if [[ -e "$destination" ]]; then
+            echo "Error: cannot resume archived issue; active file already exists: $destination" >&2
+            return 1
+        fi
+    fi
+
+    update_yaml_fields "$file" "$@" || return 1
+    if [[ "$destination" != "$file" ]]; then
+        mv -- "$file" "$destination" || return 1
+    fi
+    printf 'Updated %s:' "$(basename "$destination" .md)"
+    printf ' %s' "$@"
+    printf '\n'
 }
 
 cmd_set_assignee() {
@@ -1395,44 +1646,127 @@ cmd_help() {
 $cmd - minimal ticket system with dependency tracking
 Run 'glo readme' for full documentation.
 
-Usage: $cmd <command> [args]
+Usage: $cmd <command> [arguments] [options]
+       $cmd <command> --help
+
+Arguments in angle brackets are required; square brackets mark optional arguments.
+Uppercase placeholders such as NAME and TAG must be replaced with a value.
 
 Commands:
   create [title] [options] Create ticket, prints ID
-    -d, --description      Description text
-    --design               Design notes
-    --acceptance           Acceptance criteria
-    -t, --type             Type (bug|feature|task|epic|chore) [default: task]
-    -p, --priority         Priority 0-4, 0=highest [default: 2]
-    -a, --assignee         Assignee
-    --external-ref         External reference (e.g., gh-123, JIRA-456)
-    --parent               Parent ticket ID
-    --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
   icebox <id>              Set status to icebox (deferred, incomplete)
   close <id>               Set status to closed
   reopen <id>              Set status to open
+  archive <id>             Move a closed/iceboxed issue to archive/
+  unarchive <id>           Restore an issue file without changing its status
   status <id> <status>     Update status (open|in_progress|icebox|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] <id>   Show dependency tree (--full disables dedup)
-  dep cycle                Find dependency cycles in open tickets
+  dep cycle                Find cycles among non-closed issues in both locations
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
-  ls [--status=X] [-a X] [-T X]   List tickets
-  ready [-a X] [-T X]      List open/in-progress tickets with deps resolved
-  blocked [-a X] [-T X]    List open/in-progress tickets with unresolved deps
-  closed [--limit=N] [-a X] [-T X] List recently closed tickets (default 20, by mtime)
+  ls [options]            List tickets, filename order within each location
+  ready [options]         List open/in-progress tickets with deps resolved
+  blocked [options]       List open/in-progress tickets with unresolved deps
+  closed [options]        List recently closed tickets, newest modification first
   show <id>                Display ticket
+  set <id> key=value ...  Set one or more frontmatter attributes
   set-assignee <id> [name] Set or clear assignee field
   edit <id>                Open ticket in \$EDITOR
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
-  query [jq-filter]        Output tickets as JSON, optionally filtered
+  query [options] [jq-filter] Output tickets as JSON, optionally filtered
 
-Tickets stored as markdown files in .tickets/
+Create options (values follow the option as a separate argument):
+  -d, --description TEXT  Issue description; quote text containing spaces
+      --design TEXT      Design notes
+      --acceptance TEXT  Acceptance criteria
+  -t, --type TYPE         bug|feature|task|epic|chore [default: task]
+  -p, --priority N        Priority 0-4, 0=highest [default: 2]
+  -a, --assignee NAME     Initial assignee [default: AGENT_NAME, otherwise empty]
+      --external-ref REF External reference, e.g. gh-123 or JIRA-456
+      --parent ID        Parent issue ID
+      --tags TAGS        Comma-separated tags, e.g. ui,backend,urgent
+
+Listing options:
+      --with-archived      Include active and archived issues
+      --only-archived      Select only archived issues
+                          Both apply to ls, ready, blocked, closed and query
+                          Default: active directory only; choose at most one
+  -a NAME, --assignee=NAME Match the assignee (ls, ready, blocked, closed)
+  -T TAG, --tag=TAG        Match one whole tag (ls, ready, blocked, closed)
+      --status=STATUS     Match status (ls only; default: all statuses)
+                          STATUS: open|in_progress|icebox|closed
+      --limit=N           Maximum matching results (closed only; default: 20)
+                          N is a nonnegative integer; 0 returns no results
+  -f KEY=VALUE             Match any frontmatter attribute
+      --filter KEY=VALUE   Same as -f; also accepts --filter=KEY=VALUE
+                          Available on ls, ready, blocked, closed and query
+
+Listing options combine with AND. Repeat --filter to require multiple matches.
+Use -T for tag filtering; lowercase -t sets the type when creating an issue.
+Long listing options for assignee, tag, status and limit require '='.
+Empty legacy assignee/tag/status options disable that restriction; use -f
+assignee= to select a present empty assignee.
+
+Attribute filter behavior:
+  Scalars match exactly; inline lists match a member. Missing keys never match.
+  Values are literal, case-sensitive text. KEY= matches a present empty scalar.
+  Quote the whole KEY=VALUE for spaces. Filters must fit on one line.
+  Example: $cmd ls -f plan=review -f type=epic
+  Example: $cmd ready --assignee=agent --tag=peal --filter=priority=1
+
+Positional arguments and other options:
+  id, dep-id, target-id   Issue IDs; unambiguous partial IDs also work
+  title                  Issue title [default: Untitled]; quote multiple words
+  name                   Assignee name; omit it on set-assignee to clear the field
+  text                   Note text; add-note also accepts text on standard input
+  key=value              Attribute name and its new value; split at the first '='
+  jq-filter              jq predicate applied to each JSON issue (query only)
+                          Example: $cmd query '.type == "epic"'
+  --full                 Show repeated dependency branches (dep tree only)
+  -h, --help             Show this reference, including after a command name
+
+Attribute updates:
+  $cmd set <id> plan=accept priority=1
+  key= leaves an empty value; quote arguments with spaces or inline lists.
+  Example: $cmd set <id> 'tags=[peal, syntax]' 'assignee=Jane Doe'
+  Status updates use the usual lifecycle; use dep/link commands for relations.
+  IDs cannot be changed. All assignments are checked before writing.
+
+Archive behavior:
+  ID lookups, relationships, show, dep tree and dep cycle include archive/.
+  Dependencies always resolve against both locations, regardless of filters.
+  Closed dependencies are satisfied; iceboxed and missing ones are unresolved.
+  archive requires status closed or icebox; unarchive preserves status.
+  Both moves preserve content and modification time and refuse overwrites.
+  start/reopen or setting an active status also restores archived issues.
+  glo-notes precommit uses archive/unarchive to reconcile storage with status.
+  A still-closed/iceboxed issue will be archived again by that command.
+  Example: $cmd closed --with-archived --limit=5
+  Example: $cmd query --only-archived -f plan=accept
+
+Environment:
+  GLO_BASE     Notebook root [default: base]; relative to the workspace root
+               or an absolute path. Empty values also use the default.
+  TICKETS_DIR  Override the issue directory for direct glo-issue calls
+               [default: the selected notebook root plus /issue]
+
+Tickets are Markdown files under the selected issue directory and its archive/.
 Supports partial ID matching (e.g., '$cmd show 5c4' matches 'nw-5c46')
 EOF
 }
+
+# Command-level help is read-only, including for commands that normally mutate.
+if [[ $# -eq 2 && ( "$2" == "--help" || "$2" == "-h" ) ]]; then
+    case "$1" in
+        create|start|icebox|close|reopen|archive|unarchive|status|dep|undep|link|unlink|ls|ready|blocked|closed|show|set|set-assignee|edit|add-note|query)
+            cmd_help
+            exit 0
+            ;;
+    esac
+fi
 
 # Main dispatch
 case "${1:-help}" in
@@ -1441,20 +1775,18 @@ case "${1:-help}" in
     icebox) shift; cmd_icebox "$@" ;;
     close)  shift; cmd_close "$@" ;;
     reopen) shift; cmd_reopen "$@" ;;
+    archive|unarchive) cmd_archive_location "$@" ;;
     status) shift; cmd_status "$@" ;;
     dep)    shift; cmd_dep "$@" ;;
     undep)  shift; cmd_undep "$@" ;;
     link)   shift; cmd_link "$@" ;;
     unlink) shift; cmd_unlink "$@" ;;
-    ls)     shift; cmd_ls "$@" ;;
-    ready)  shift; cmd_ready "$@" ;;
-    blocked) shift; cmd_blocked "$@" ;;
-    closed) shift; cmd_closed "$@" ;;
+    ls|ready|blocked|closed|query) cmd_filtered_list "$@" ;;
     show)   shift; cmd_show "$@" ;;
+    set)    shift; cmd_set "$@" ;;
     set-assignee) shift; cmd_set_assignee "$@" ;;
     edit)   shift; cmd_edit "$@" ;;
     add-note) shift; cmd_add_note "$@" ;;
-    query) shift; cmd_query "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
         echo "Unknown command: $1" >&2

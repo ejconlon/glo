@@ -5,15 +5,18 @@ Use glo to manage work in this repository: issues, agent focus, builds, generate
 ## Core Rules
 
 - Run commands from inside the workspace git repository.
-- The workspace root is the nearest parent directory containing `.git`.
-- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-garage`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
-- `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes.
+- Workspace lookup uses the current directory or nearest ancestor with a `.git` directory. A `.git` file, as used by linked worktrees and submodules, does not establish a workspace root.
+- Inside the devcontainer, prefer `glo`, `glo-agent`, `glo-build`, `glo-caddy`, `glo-garage`, `glo-issue`, `glo-gen`, `glo-local`, `glo-notes`, `glo-postgres`, and `glo-secrets` directly; `/opt/glo/bin` is on `PATH`.
+- `bin/glo*` wrappers also work in bootstrapped workspaces and are used by generated `justfile` recipes. They prefer `/opt/glo/bin` when installed and otherwise use the checkout scripts.
+- `glo issue ...`, `glo build ...` and the other dispatcher commands invoke their `glo-*` counterparts. `glo readme` prints this guide from the selected glo installation.
 - Do not edit `.glo/` directly unless debugging glo itself; it is generated state.
 - Use issues for durable task state. Use notes for longer-lived project knowledge.
 
 ## Workspace Layout
 
-Bootstrapped workspaces normally contain:
+Bootstrapped workspaces normally contain the following paths. Examples in
+this guide use the default `base/`; set `GLO_BASE` as described below to choose
+a different notebook directory.
 
 - `base/issue/`: Markdown issues managed by `glo-issue` and `glo-agent`.
 - `base/wiki/`: project notes managed through `glo-notes`/`zk`.
@@ -22,9 +25,43 @@ Bootstrapped workspaces normally contain:
 - `.glo/build`: host-side venv for glo tooling.
 - `.glo/venv/<project>`: per-project build/dependency state.
 - `.glo/agent/<agent>/focus`: per-agent focus stack.
-- `bin/glo*`: wrappers that use `/opt/glo/bin` in the container and checkout scripts on the host.
+- `bin/glo*`: wrappers that select the installed or checkout tools as described above.
 
 `glo-build` uses the glo installation path for its own implementation (`/opt/glo/lib/build` in the container, or the checkout-relative path on the host). Workspaces do not need a `lib/build` symlink.
+
+### Notebook directory
+
+`GLO_BASE` selects the notebook root for `glo-issue`, `glo-agent`, `glo-notes`
+and `bootstrap.sh`, including commands invoked through the `glo` dispatcher.
+
+- **Default:** Unset or empty `GLO_BASE` uses `<workspace>/base`.
+- **Relative path:** `GLO_BASE=knowledge` uses `<workspace>/knowledge`, even
+  when commands run from a workspace subdirectory.
+- **Absolute path:** `GLO_BASE=/path/to/notebook` uses that directory directly.
+- **Contents:** Issues and archives live in `issue/` and `issue/archive/`;
+  wiki notes live in `wiki/`; notebook config and the database live in `.zk/`.
+  Generated title and tag indexes also use the selected notebook.
+- **Bootstrap:** Reads `GLO_BASE` from its environment and scaffolds the
+  selected directory. It does not save the value in generated wrappers. It
+  adds the selected database path to the workspace's `.gitignore` when the
+  notebook is inside the workspace.
+- **Issue-only override:** Direct `glo-issue` calls still honor `TICKETS_DIR`
+  ahead of `GLO_BASE/issue`. Agent and notes workflows use their selected
+  notebook's `issue/` directory, regardless of an ambient `TICKETS_DIR`.
+
+For example, from the workspace root:
+
+```sh
+export GLO_BASE="knowledge base"
+./submodules/glo/bootstrap.sh
+./bin/glo issue ls
+./bin/glo notes zk list
+```
+
+Keep `GLO_BASE` set in the environment where later commands run, including
+inside a devcontainer when using one. Selecting a different path does not
+move existing notes or issues. Agent focus and build state remain under the
+workspace's `.glo/` directory.
 
 ## Starting Work
 
@@ -42,19 +79,33 @@ Use `--force` only when intentionally overriding another agent's ownership.
 
 ## Issues
 
-Issues are Markdown files in `base/issue/` with YAML frontmatter. IDs are generated from title plus a short hash. Most commands accept partial IDs when unambiguous.
+Issues are Markdown files with YAML frontmatter in the selected notebook's
+`issue/` directory (default `base/issue/`). IDs are generated from title plus
+a short hash. Most commands accept partial IDs when unambiguous.
+`TICKETS_DIR` overrides the issue directory for direct `glo-issue` calls.
+
+`ls`, `ready`, `blocked`, `closed` and `query` select issues directly in the
+active issue directory by default. Add `--with-archived` to select from both
+that directory and `archive/`, or `--only-archived` to select only archived issues.
+Commands that address an issue by ID, such as `show` and `set`, always find
+issues in both locations. Dependencies and other relationships also resolve
+across both locations, regardless of listing scope or attribute filters.
 
 Common commands:
 
 ```sh
 glo-issue create "Title"                  # create issue, print ID
 glo-issue ls                              # list issues
-glo-issue ready                           # list open/in-progress issues with closed deps
-glo-issue blocked                         # list issues blocked by open deps
+glo-issue ready                           # open/in-progress with no unresolved deps
+glo-issue blocked                         # open/in-progress with unresolved deps
+glo-issue closed                          # recently modified closed issues, before archiving
+glo-issue closed --with-archived           # include archived history
 glo-issue show <id>                       # show issue plus related context
 glo-issue start <id>                      # status: in_progress
 glo-issue icebox <id>                     # status: icebox (deferred, incomplete)
 glo-issue close <id>                      # status: closed
+glo-issue archive <id>                    # move a closed/iceboxed issue to archive/
+glo-issue unarchive <id>                  # restore the file, preserving its status
 glo-issue status <id> open                # set explicit status
 glo-issue dep <id> <blocker-id>           # make id depend on blocker-id
 glo-issue undep <id> <blocker-id>         # remove dependency
@@ -63,26 +114,170 @@ glo-issue dep cycle                       # detect dependency cycles
 glo-issue link <id> <other-id>            # symmetric relation, not blocking
 glo-issue unlink <id> <other-id>          # remove relation
 glo-issue add-note <id> "Update"          # append timestamped note
+glo-issue set <id> plan=accept            # add or update an attribute
 glo-issue set-assignee <id> <name>        # assign
 glo-issue set-assignee <id>               # clear assignee
 glo-issue query                           # emit JSON lines
 ```
 
 Use dependencies for blocking relationships. Use links for related work that does not block progress.
+Relationship commands accept unambiguous partial IDs and store full IDs.
+`show` resolves parent, child, blocker and linked-issue context across both
+locations. `dep tree` includes archived dependencies; `dep cycle` checks
+non-closed issues in both locations, including iceboxed issues.
+
+Run `glo-issue --help` or `glo-issue <top-level-command> --help` for argument
+definitions, supported option forms and defaults. In listing commands:
+
+- **Archive scope:** `--with-archived` includes active and archived issues;
+  `--only-archived` selects only archived issues. Both work on `ls`, `ready`,
+  `blocked`, `closed` and `query`. They cannot be combined. Without either,
+  only active-directory issues are candidates.
+- **Assignee:** `-a NAME` or `--assignee=NAME` selects issues assigned to NAME.
+- **Tag:** `-T TAG` or `--tag=TAG` selects issues containing that whole tag.
+  Uppercase `-T` filters tags; lowercase `-t` sets the type on `create`.
+- **Status:** `--status=STATUS` restricts `ls` to `open`, `in_progress`,
+  `icebox` or `closed`. Without it, `ls` includes all statuses in its issue set.
+- **Limit:** `--limit=N` caps matching `closed` results, newest modification
+  first. It defaults to 20; 0 returns no results.
+- **Attribute:** `-f KEY=VALUE`, `--filter KEY=VALUE` or `--filter=KEY=VALUE`
+  selects any frontmatter attribute, as described below.
+
+Assignee and tag options apply to `ls`, `ready`, `blocked` and `closed`.
+Use `--filter` for those fields on `query`. Long listing options for assignee,
+tag, status and limit use `=`; creation options take separate values, such as
+`create "Title" --assignee agent --tags peal,syntax`. Listing restrictions
+combine with AND. Empty legacy assignee/tag/status values disable that
+restriction; use `-f assignee=` to select a present empty assignee.
+
+### Attribute updates
+
+Set one or more frontmatter attributes with `glo-issue set <id> key=value ...`.
+The command accepts full or unambiguous partial IDs, including archived issues.
+
+```sh
+glo-issue set <id> plan=accept
+glo-issue set <id> plan=review priority=1
+glo-issue set <id> 'assignee=Jane Doe' 'tags=[peal, syntax]'
+glo-issue set <id> plan=
+```
+
+- **Assignments:** Existing fields are replaced; missing fields are added.
+  Multiple assignments are checked before writing and applied together. If a
+  key is repeated, its last value wins. The body and unrelated fields are kept.
+- **Values:** Use the issue format's literal, single-line scalar or inline-list
+  spelling. The first `=` separates the key and value. Quote the entire argument
+  for spaces or shell metacharacters. `key=` leaves a present empty scalar; it
+  does not remove the field. Updated values can be selected with `--filter`.
+- **Lifecycle:** `status=` accepts the existing status values and restores an
+  archived issue to the active directory when set to `open` or `in_progress`.
+  Updating other attributes leaves an archived issue in place. Issue IDs cannot
+  be changed; use `dep`/`undep` and `link`/`unlink` to change relationships.
+
+Custom attributes such as `plan` are stored and filtered as data. Glo does not
+enforce their meaning; follow the workspace's instructions for plan review and
+implementation approval.
+
+### Attribute filters
+
+Use repeatable `--filter key=value` options (`-f key=value` or
+`--filter=key=value` also work) with `ls`, `ready`, `blocked`, `closed` and
+`query`. Any flat frontmatter attribute can be selected, including custom
+fields such as `plan`.
+
+```sh
+glo-issue ls -f plan=review -f type=epic
+glo-issue ready --filter=priority=1 -a agent
+glo-issue blocked -f parent=some-epic-id
+glo-issue closed --limit=5 -f tags=peal
+glo-issue closed --with-archived --limit=5 -f tags=peal
+glo-issue query --only-archived -f plan=accept
+glo-issue ls -f 'assignee=Jane Doe'
+glo-issue query -f plan=review '.type == "epic"'
+```
+
+- **Combination:** Every filter must match (AND). Existing status, assignee
+  and tag options still apply, as does the optional jq expression on `query`.
+- **Values:** Scalars use exact, case-sensitive text equality; inline lists
+  use exact member equality. Values use their stored spelling with surrounding
+  frontmatter whitespace trimmed. Filters are neither regular expressions nor
+  executable expressions. The first `=` separates key and value, so values
+  can contain additional `=` characters. Quote the entire argument for spaces
+  or shell metacharacters. Filters must fit on one line.
+- **Empty fields:** `assignee=` matches a present empty scalar. Missing
+  attributes never match, and an empty list has no matching member.
+- **Scope:** Filters and archive options select candidates. Readiness and
+  blockers always use dependency records from both locations, including those
+  outside the selected scope or filters. `closed --limit=N` returns up to N
+  matching issues in modification-time order across the selected locations,
+  without a separate candidate-count cutoff.
+
+### Status and archives
+
+An issue's status describes its work state. Archiving changes its storage
+location to `base/issue/archive/` and keeps its status and ID. The active
+directory can contain closed or iceboxed issues until they are archived.
 
 Issue statuses have distinct lifecycle meanings:
 
-- `open`: planned work eligible for ready or blocked queues;
-- `in_progress`: active work, also eligible for those queues;
-- `icebox`: intentionally deferred, incomplete work excluded from active queues
-  and stored in the issue archive; dependencies on it remain unresolved; and
-- `closed`: completed work that satisfies dependencies and is archived by
-  `glo-notes precommit`.
+- **`open`:** Planned work eligible for ready or blocked queues.
+- **`in_progress`:** Active work, also eligible for those queues.
+- **`icebox`:** Deferred, incomplete work excluded from active queues;
+  dependencies on it remain unresolved.
+- **`closed`:** Completed work, excluded from active queues.
 
-`glo-notes precommit` moves iceboxed issue files to `base/issue/archive/`.
-Archived issues remain addressable by ID. `glo-issue start <id>` or
-`glo-issue reopen <id>` immediately restores an iceboxed issue to `base/issue/`;
+Choose which storage locations a listing searches:
+
+- **No archive flag:** Only issues in the active directory.
+- **`--with-archived`:** Issues in both the active directory and the archive.
+- **`--only-archived`:** Only issues in the archive.
+
+These options work on `ls`, `ready`, `blocked`, `closed` and `query`, and
+combine with status, attribute and other supported filters. Use at most one
+archive flag. The command's status rules still apply: `ready` and `blocked`
+consider only open or in-progress issues, while `closed` selects completed
+issues. Selecting the archive does not make closed or iceboxed issues ready.
+
+```sh
+glo-issue ls                                  # active directory, all statuses
+glo-issue ls --with-archived -f tags=peal       # matching issues in both locations
+glo-issue ls --only-archived --status=icebox    # archived deferred work
+glo-issue closed --with-archived --limit=5      # five most recently modified matches
+glo-issue query --only-archived -f plan=accept  # archived matches as JSON lines
+```
+
+`glo-issue archive <id>` moves a closed or iceboxed issue to
+`base/issue/archive/`. It refuses to archive open or in-progress work.
+`glo-issue unarchive <id>` restores the file without changing its status.
+Both moves preserve the file's content, permissions and modification time,
+refuse destination collisions, and succeed without changes if the issue is
+already in the requested location.
+
+`glo-notes precommit` uses these commands to archive closed and iceboxed issues
+and restore archived issues whose status has become active. A closed or
+iceboxed issue restored with `unarchive` will therefore be archived again on
+the next notes precommit. Until archival, closed and iceboxed issues remain
+visible in active-directory listings. Archived issues remain addressable by ID.
+`glo-issue start <id>`, `glo-issue reopen <id>` or setting status to `open` or
+`in_progress` immediately restores an archived issue to `base/issue/`;
 `glo-agent focus push <id>` does the same while assigning and focusing it.
+
+Archiving does not change dependency resolution: a closed dependency is
+satisfied in either location. An iceboxed, open, in-progress or missing
+dependency remains unresolved. For example, if A depends on B, closing and
+archiving B leaves that dependency satisfied when running `ready` for A,
+even without an archive flag. ID-based commands such as `show`, `set`,
+`dep` and `link` find archived issues without a listing flag.
+
+```sh
+glo-issue close <id>      # mark completed; the file remains in its current location
+glo-issue archive <id>    # move the completed issue into the archive
+glo-issue show <id>       # inspect it by ID in the archive
+glo-issue reopen <id>     # restore it to the active directory and set status open
+```
+
+Use `unarchive` when you want only to move the file. Use `reopen` or `start`
+when you want to resume the work as open or in progress, respectively.
 
 ## Agent Focus
 
@@ -119,9 +314,16 @@ glo-agent issue show <id>
 glo-agent issue add-note <id> "Update"
 glo-agent issue block <id> <blocker-id>
 glo-agent issue link <id> <other-id>
+glo-agent issue unlink <id> <other-id>
 glo-agent issue assign <id> <name>
 glo-agent issue unassign <id>
 ```
+
+`issue ready`, `issue blocked` and `focus ready` forward listing options,
+including `-f KEY=VALUE`, `--with-archived` and `--only-archived`, to
+`glo-issue`. The separate `issue list` view does not
+apply those options. Use `glo-issue ls` for filtered listings and
+`glo-issue set` or `glo-issue query` for attribute updates or JSON output.
 
 Typical agent loop:
 
@@ -130,13 +332,22 @@ glo-agent issue ready
 glo-agent focus push <id>
 # do the work
 glo-agent focus add-note "Implemented X; validating Y"
-glo-agent precommit
+just precommit
 glo-agent focus close
 ```
 
+Follow the workspace's required validation before closing an issue.
+`glo-agent precommit` runs only `glo-build --filter=work precommit`.
+The workspace's `just precommit` recipe can add notes maintenance and other
+checks; inspect that recipe and the workspace instructions for its scope.
+
 ## Builds
 
-`glo-build` discovers projects by scanning `lib/**/build.json`. Each project declares a `language`; optional fields include `py_package`, `extra_deps`, `targets`, and `enabled`.
+`glo-build` currently discovers `lib/*/build.json` and
+`lib/*/*/build.json`: one or two directory levels below `lib/`. For example,
+`lib/foo/build.json` and `lib/foo/bar/build.json` are detected, but
+`lib/foo/bar/baz/build.json` is not. Each project declares a `language`;
+optional fields include `py_package`, `extra_deps`, `targets`, and `enabled`.
 
 Common commands:
 
@@ -149,7 +360,7 @@ glo-build typecheck               # static checks
 glo-build unit                    # unit tests
 glo-build test                    # typecheck + unit
 glo-build precommit               # gen + format + lint + test
-glo-build clean                   # remove build artifacts and project venvs
+glo-build clean                   # language-specific artifact/cache cleanup
 ```
 
 Select projects and languages:
@@ -165,6 +376,27 @@ glo-build /ps format              # all PureScript projects
 glo-build /py ^/lib/core test     # exclude a project
 glo-build precommit ^test         # precommit without test subtargets
 ```
+
+Use explicit paths for Rocq projects, such as
+`glo-build /lib/my_proofs typecheck`; `/rocq` is not currently a language
+selector. `clean` removes
+project environments for some languages, but is not a universal venv deletion
+command; Rust, for example, uses `cargo clean`.
+
+Change filters narrow the selected projects:
+
+- **`--filter=none`:** No change filter (the default).
+- **`--filter=work`:** Projects with staged, unstaged or untracked changes,
+  plus projects that depend on them.
+- **`--filter=workonly`:** Only projects with those working-tree changes.
+- **`--filter=head`:** Projects changed by the latest commit, plus projects
+  that depend on them.
+
+For example, `glo-build --filter=work precommit` checks affected projects.
+Only changed paths inside discovered project directories select projects;
+changes elsewhere, such as shared workspace config or Glo itself, do not
+automatically select projects. No matching projects means no tasks run.
+`--dryrun` prints the planned task scripts without executing them.
 
 Haskell formatting uses Fourmolu for `src/`, `test/`, and `app/`. Glo selects
 `fourmolu.yaml` next to the project's `build.json` first, then falls back to
@@ -205,17 +437,18 @@ Documentation never runs or consumes arguments; arguments after `--` still go
 to the last executable step. Use `report -- --help` to pass help to the command
 itself.
 
-Mode flags:
+Mode flags must come before selectors and other options:
 
 ```sh
 glo-build --local precommit       # plan and execute locally
-glo-build --container precommit      # plan and execute in a container
+glo-build --container precommit   # plan and execute in a container
 glo-build --plan-local --exec-container precommit
 glo-build --plan-container --exec-local precommit
 ```
 
-`GLO_CONTAINER_ENGINE` selects `podman` or `docker` for containerized
-operations. The platform default is Docker on macOS and Podman on other
+Local planning and execution are the default. `GLO_CONTAINER_ENGINE` selects
+`podman` or `docker` for containerized operations. The platform default is
+Docker on macOS and Podman on other
 supported hosts. Inside a container, containerized mode is forced back to local
 mode. Container builds run as the image's `user` account by default; set
 `GLO_CONTAINER_USER` for a compatible custom image that uses a different
@@ -229,16 +462,25 @@ Build state locations:
 - `/opt/glo/.venv`: image-provided glo tooling venv.
 - `.glo/venv/<project>`: project-specific dependency/build state.
 
-Language isolation:
+Project names in state paths omit `lib/` and replace `/` with `_`:
+`lib/foo/bar` uses `.glo/venv/foo_bar`.
 
-| language | tools | state |
-|----------|-------|-------|
-| `py` | uv, ruff, ty, pytest | `.glo/venv/<name>/` |
-| `ps` | spago, purs, purs-tidy | `.glo/venv/<name>/node_modules`, outputs |
-| `hs` | cabal, fourmolu, hlint | `.glo/venv/<name>/cabal`, `dist-newstyle` |
-| `rs` | cargo, rustfmt, clippy | `.glo/venv/<name>/target` |
-| `ts` | npm, tsc, eslint, prettier, jest | `.glo/venv/<name>/node_modules` |
-| `meta` | custom targets | custom |
+Language tools and state:
+
+- **Python (`py`):** uv, ruff, ty and pytest; environment under
+  `.glo/venv/<name>/`.
+- **PureScript (`ps`):** spago, purs and purs-tidy; dependencies and outputs
+  under `.glo/venv/<name>/`.
+- **Haskell (`hs`):** cabal, fourmolu and hlint; config and package index in
+  `.glo/venv/<name>/cabal/`, store in `.glo/venv/<name>/store/`, and build
+  output in `.glo/venv/<name>/dist-newstyle/`.
+- **Rust (`rs`):** cargo, rustfmt and clippy; target directory at
+  `.glo/venv/<name>/target/`.
+- **TypeScript (`ts`):** npm, tsc, eslint, prettier and jest; dependencies in
+  `.glo/venv/<name>/node_modules/`.
+- **Rocq (`rocq`):** rocq and make; `_CoqProject` generates a local Makefile,
+  with compiled proof artifacts in the project tree.
+- **Metadata (`meta`):** Custom targets and their own state locations.
 
 Rust projects have a standard compilation command, so ordinary crates do not
 need to repeat Cargo recipes in `build.json`:
@@ -292,6 +534,7 @@ Template types:
 - `py`: Python package.
 - `ps`: PureScript package.
 - `hs`: Haskell package.
+- `rocq`: Rocq proof project.
 - `rs`: Rust crate.
 - `ts`: TypeScript package.
 
@@ -299,24 +542,41 @@ Generated projects include `build.json` so `glo-build` can discover them.
 
 ## Notes
 
-`glo-notes` wraps `zk` for the `base/` notebook.
+`glo-notes` wraps `zk` for the notebook selected by `GLO_BASE` (default `base/`).
 
 ```sh
 glo-notes index                  # update zk index and generated indexes
-glo-notes precommit              # archive closed and iceboxed issues, index
-glo-notes <zk-cmd>               # pass through to zk with ZK_NOTEBOOK_DIR=base/
+glo-notes precommit              # reconcile archives through glo-issue, then index
+glo-notes zk <subcommand> [args]  # pass remaining arguments to zk in the selected notebook
+glo-notes zk list --tag peal
+glo-notes zk new --group wiki --title "Project notes"
+glo-notes zk --help
 ```
 
-Notes layout:
+Only `glo-notes zk ...` passes commands through, with `ZK_NOTEBOOK_DIR` set to
+the resolved notebook directory. This overrides an ambient `ZK_NOTEBOOK_DIR`.
+Unknown top-level commands are errors;
+for example, use `glo-notes zk list` instead of `glo-notes list`.
 
-- `base/issue/`: open and in-progress issue notes.
+`glo-notes precommit` delegates issue moves to `glo-issue archive` and
+`glo-issue unarchive`, then updates the notebook and generated indexes.
+Closed and iceboxed issues move into the archive; archived issues whose status
+has been changed to open or in progress return to the active directory.
+
+Notes layout below the selected notebook root (shown with the default `base/`):
+
+- `base/issue/`: active issue notes, including closed and iceboxed issues
+  awaiting archival.
 - `base/issue/archive/`: completed closed issues and deferred iceboxed issues;
   resuming an iceboxed issue restores it to `base/issue/`.
 - `base/wiki/`: project wiki notes.
 - `base/**/TITLES.md`: generated title index.
 - `base/**/TAGS.md`: generated tag index.
 
-The SQLite index at `base/.zk/notebook.db` is generated and gitignored.
+Generated title and tag indexes exclude archived notes. The SQLite index at
+`<notebook>/.zk/notebook.db` is generated. Bootstrap adds it to the workspace's
+`.gitignore` for notebooks inside that workspace; external notebooks are
+outside that Git repository's scope.
 
 ## Workspace `justfile`
 
@@ -338,16 +598,18 @@ native builder.
 
 ## Local Host Tooling
 
-Use `glo-local` outside the devcontainer when you want the host OS to have the same toolchain families as the image. It detects Arch Linux or macOS and installs packages with `pacman` or `brew`. Haskell and Rust versions are pinned to the image versions.
+Use `glo-local` outside the devcontainer when you want the host OS to have the same toolchain families as the image. It detects Arch Linux or macOS and installs packages with `pacman` or `brew`. Haskell and Rust versions are pinned to the image versions. On other Linux distributions, only `wasm`, `smt` and `doctor` are supported, assuming base tools are already installed.
 
 ```sh
 glo-local doctor                  # show detected OS/arch and installed tools
 glo-local --dry-run all           # print install commands without running them
+glo-local need                    # install toolchains enabled by workspace config
 glo-local base                    # common CLI tools
 glo-local py                      # Python and uv
 glo-local rs                      # Rust 1.97.1 + rustfmt/clippy/rust-analyzer/rust-src
 glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, fourmolu, hlint via ghcup
 glo-local wasm                    # wasm32-wasi GHC, wasm32-wasi-cabal, wasmtime, binaryen
+glo-local rocq                    # Rocq 9.2.0 and companion packages via opam
 glo-local smt                     # checksummed cvc5 1.4.2
 glo-local ts                      # Node/npm
 glo-local ps                      # PureScript tooling via npm
@@ -378,7 +640,8 @@ eval "$(glo postgres env)"
 export MY_PROJECT_TEST_DATABASE_URL="$GLO_POSTGRES_URL"
 ```
 
-The cluster listens only on `127.0.0.1:55432`, uses the fixed local-only
+The cluster listens only on `127.0.0.1`, on port `55432` by default
+(`GLO_POSTGRES_PORT` overrides it), uses the fixed local-only
 `glo:glo` credential and `glo_test` database, and stores disposable state under
 `${XDG_STATE_HOME:-$HOME/.local/state}/glo/postgres-18`. The remaining commands
 are `glo postgres status`, `url`, and `stop`. `glo postgres run` initializes the
@@ -389,8 +652,9 @@ On a host without PostgreSQL 18, the same enabled devcontainer image can own a
 dedicated container while exposing only the host loopback port:
 
 ```sh
-GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --container start
-eval "$(GLO_POSTGRES_ROOT="$PWD/temp/run/postgres" glo-postgres --container env)"
+export GLO_POSTGRES_ROOT="$PWD/temp/run/postgres"
+glo-postgres --container start
+eval "$(glo-postgres --container env)"
 glo-postgres --container stop
 ```
 
@@ -414,7 +678,14 @@ archives whose SHA-256 digests are pinned in the image Dockerfile. The temporary
 Go toolchain is also checksummed, and the source trees are supplied to `xcaddy`
 as local module replacements. It defaults to `0`, installs no service or
 configuration, and starts no process. Projects supply their own Caddyfile and
-run Caddy in the foreground with `glo caddy run`.
+set `CADDY_CONFIG_FILE` to its absolute path. Both `validate` and `run` require
+that file to exist:
+
+```sh
+export CADDY_CONFIG_FILE="$PWD/config/Caddyfile"
+glo caddy validate
+glo caddy run                      # own Caddy in the foreground
+```
 
 ### Local KDBX credentials
 
@@ -458,7 +729,7 @@ Before handing off:
 
 ```sh
 glo-agent focus add-note "Summary of changes and validation"
-glo-agent precommit
+just precommit
 glo-agent focus close
 ```
 

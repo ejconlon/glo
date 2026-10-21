@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$PWD"
 PROJECT_NAME="$(basename "$WORKSPACE_DIR")"
+# shellcheck source=devcontainer/image/files/glo/lib/paths.sh
+source "${SCRIPT_DIR}/devcontainer/image/files/glo/lib/paths.sh"
+BASE_DIR="$(glo_base_dir "$WORKSPACE_DIR")"
 
 relpath() {
     local from="$1"
@@ -19,6 +22,7 @@ relpath() {
 
 echo "[I] Bootstrapping devcontainer for project: $PROJECT_NAME"
 echo "[I] Workspace: $WORKSPACE_DIR"
+echo "[I] Notebook: $BASE_DIR"
 
 mkdir -p "${WORKSPACE_DIR}/.devcontainer"
 
@@ -95,13 +99,13 @@ done
 
 # Scaffold workspace directories
 for _gitkeep in \
-    "base/issue/.gitkeep" \
-    "base/wiki/.gitkeep" \
-    "lib/.gitkeep"
+    "${BASE_DIR}/issue/.gitkeep" \
+    "${BASE_DIR}/wiki/.gitkeep" \
+    "${WORKSPACE_DIR}/lib/.gitkeep"
 do
-    if [[ ! -e "${WORKSPACE_DIR}/${_gitkeep}" ]]; then
-        mkdir -p "${WORKSPACE_DIR}/$(dirname "$_gitkeep")"
-        touch "${WORKSPACE_DIR}/${_gitkeep}"
+    if [[ ! -e "${_gitkeep}" ]]; then
+        mkdir -p "$(dirname "$_gitkeep")"
+        touch "${_gitkeep}"
         echo "[I] Created $(dirname "$_gitkeep")/"
     else
         echo "[I] $(dirname "$_gitkeep")/ already exists, skipping"
@@ -119,13 +123,13 @@ else
     echo "[I] justfile already exists, skipping"
 fi
 
-# Initialize base/.zk from scaffold
-BASE_ZK="${WORKSPACE_DIR}/base/.zk"
+# Initialize the selected notebook from the scaffold.
+BASE_ZK="${BASE_DIR}/.zk"
 if [[ ! -e "${BASE_ZK}" ]]; then
     cp -r "${SCRIPT_DIR}/devcontainer/image/files/glo/base-scaffold/.zk" "${BASE_ZK}"
-    echo "[I] Created base/.zk"
+    echo "[I] Created ${BASE_ZK}"
 else
-    echo "[I] base/.zk already exists, skipping"
+    echo "[I] ${BASE_ZK} already exists, skipping"
 fi
 
 # Add generated paths to .gitignore
@@ -139,6 +143,22 @@ add_to_gitignore() {
 }
 
 add_to_gitignore "/.glo"
-add_to_gitignore "/base/.zk/notebook.db"
+BASE_REL="$(relpath "$WORKSPACE_DIR" "$BASE_DIR")"
+case "$BASE_REL" in
+    ..|../*) ;; # An external notebook has no path in this workspace's Git index.
+    *)
+        # Quote glob metacharacters so the entry ignores exactly this notebook.
+        BASE_IGNORE="${BASE_REL//\\/\\\\}"
+        BASE_IGNORE="${BASE_IGNORE//\*/\\*}"
+        BASE_IGNORE="${BASE_IGNORE//\?/\\?}"
+        BASE_IGNORE="${BASE_IGNORE//\[/\\[}"
+        BASE_IGNORE="${BASE_IGNORE//\]/\\]}"
+        if [[ "$BASE_REL" == . ]]; then
+            add_to_gitignore "/.zk/notebook.db"
+        else
+            add_to_gitignore "/${BASE_IGNORE}/.zk/notebook.db"
+        fi
+        ;;
+esac
 
 echo "[I] Done. To build: just image"

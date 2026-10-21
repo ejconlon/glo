@@ -17,9 +17,12 @@ _find_workspace() {
     return 1
 }
 WORKSPACE_DIR="$(_find_workspace)"
-[[ -d "${WORKSPACE_DIR}/base/issue" ]] || { echo "[E] base/issue not found in $WORKSPACE_DIR" >&2; exit 1; }
+# shellcheck source=../lib/paths.sh
+source "${_GLO_BIN_DIR}/../lib/paths.sh"
+BASE_DIR="$(glo_base_dir "$WORKSPACE_DIR")"
 
-TICKETS_DIR="${WORKSPACE_DIR}/base/issue"
+TICKETS_DIR="${BASE_DIR}/issue"
+[[ -d "$TICKETS_DIR" ]] || { echo "[E] Issue directory not found: $TICKETS_DIR - run bootstrap.sh first" >&2; exit 1; }
 AGENT_DIR="${WORKSPACE_DIR}/.glo/agent/${AGENT_NAME}"
 mkdir -p "$AGENT_DIR"
 
@@ -684,6 +687,13 @@ Manage issues directly with issue subcommands:
 
 Build:
   precommit        Run glo-build --filter=work precommit
+
+Environment:
+  GLO_BASE         Notebook root [default: base]; relative to the workspace root
+                   or an absolute path. Empty values also use the default.
+                   Issues live under its issue/ directory.
+  AGENT_NAME       Agent identity [default: agent]; focus state remains under
+                   the workspace's .glo/agent/ directory.
 EOF
 }
 
