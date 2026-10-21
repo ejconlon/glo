@@ -168,9 +168,10 @@ RUN if [ "${GARAGE_ENABLED}" = "1" ]; then \
 # Install an explicit PostgreSQL 18 client, server, and development boundary.
 # The default image contains no PostgreSQL packages or initialized cluster.
 ARG POSTGRES_ENABLED=0
-ARG PGDG_REPO_RPM_VERSION=42.0-66
-ARG PGDG_REPO_SHA256_X64=47cc6e0243230a0ebe79552ed932688ce58552bbc570e19b0888b3e8c88a66c7
-ARG PGDG_REPO_SHA256_ARM64=a5c3355fb7667ccbba2d0f31ada02a658101ebdfe4aa384317070d9ae1890c31
+ARG PGDG_REPO_RPM_VERSION=42.0-69
+ARG PGDG_REPO_SHA256_X64=6f6272b26ec3a26f2701ed47c69c580691affdf59ef26fa5a9c5a78f94f40a5d
+ARG PGDG_REPO_SHA256_ARM64=494f3404ee8a3803d40a494d261c9da7b6d49fab65e7c5753946df8102553960
+# The common repository retains versioned RPMs; reporpms only keeps the latest.
 RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
     --mount=type=cache,target=/var/lib/dnf,id=dnf-lib-dev,sharing=locked \
     if [ "${POSTGRES_ENABLED}" = "1" ]; then \
@@ -183,7 +184,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
     esac; \
     repo_rpm="pgdg-redhat-repo-${PGDG_REPO_RPM_VERSION}.rhel10PGDG.noarch.rpm"; \
     curl -fsSLo "/tmp/${repo_rpm}" \
-        "https://download.postgresql.org/pub/repos/yum/reporpms/EL-10-${repo_arch}/${repo_rpm}"; \
+        "https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-10-${repo_arch}/${repo_rpm}"; \
     echo "${checksum}  /tmp/${repo_rpm}" | sha256sum -c -; \
     rpm --install "/tmp/${repo_rpm}"; \
     microdnf -y --setopt=install_weak_deps=0 install \
