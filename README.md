@@ -58,8 +58,10 @@ Issue details open in `$PAGER`, or default to `bat` when available and `less`
 otherwise. The default viewer wraps at word boundaries through `less --wordwrap`,
 with bat supplying Markdown highlighting. Quit the pager to return to the board.
 Configure the board with keyboard controls: `g` changes the grouping field,
-`c` adds columns (`C` resets), and `f` adds filters (`F` clears). For an epic
+`+` adds columns (`C` resets), and `f` adds filters (`F` clears). For an epic
 planning board, enter `plan` at the `g` prompt and `type=epic` at the `f` prompt.
+`c` copies the selected full issue ID using `wl-copy` on Linux or `pbcopy` on
+Darwin. Success or failure appears on the status line; other platforms are unsupported.
 `v` cycles active/all/archived scope. Status boards hide icebox by default;
 `i` toggles it. Details default to a 120-column target, limited to the terminal
 width when opened. Use `glo board --wrap-width N` or `w` to change it; `0`

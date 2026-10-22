@@ -19,7 +19,7 @@ fixed until the pager closes. Reopen details to recalculate after resizing, or
 use 0 for automatic width that follows terminal resizing.
 Columns default to open/in_progress/closed for status and
 create/review/reject/accept for plan. Other fields discover sorted values.
-Icebox is hidden on status boards until requested with i or added with c.
+Icebox is hidden on status boards until requested with i or added with +.
 Other grouping fields include matching iceboxed issues normally.
 Missing/empty values appear in Unassigned; unlisted values appear in Other.
 These two display buckets cannot be move destinations. List fields are rejected.
@@ -32,7 +32,7 @@ word-wrapped title lines, with an ellipsis for overflow. Actions use the full ID
 
 Keys:
   g                 Group by a scalar field (empty resets to status and auto columns)
-  c                 Add a column value; first addition replaces automatic columns
+  +                 Add a column value; first addition replaces automatic columns
   C                 Reset columns to their automatic values and order
   f                 Add a key=value filter (repeat for AND)
   F                 Clear all attribute filters
@@ -41,6 +41,7 @@ Keys:
   w                 Set detail wrap width (0 = automatic terminal width)
   arrows or h/j/k/l  Navigate columns/cards (columns scroll on narrow terminals)
   Enter             Open details in $PAGER, otherwise bat or less; quit pager to return
+  c                 Copy the selected full issue ID (Linux: wl-copy; Darwin: pbcopy)
   m                 Choose a destination, Enter moves; Escape cancels
   n                 Create an issue from a title, using glo-issue defaults
   s                 Set one key=value attribute on the selected issue
@@ -54,7 +55,8 @@ Moving changes only the grouping field. Backend lifecycle rules apply:
 active statuses restore archived issues; only closed/icebox can be archived.
 Creation may be hidden by current filters or archive scope. All changes refresh.
 Grouping changes reset custom columns and keep filters. Column values are added
-in order; use C then c to replace the list. Settings apply only to this session.
+in order; use C then + to replace the list. Settings apply only to this session.
+Copying reports success or failure on the status line; other platforms are unsupported.
 No shell expressions are evaluated. Prompts accept literal single-line text.
 
 Environment: GLO_BASE defaults to base relative to the workspace root; absolute
@@ -230,6 +232,26 @@ cleanup() {
     [[ -z "$detail_file" ]] || rm -f -- "$detail_file"
 }
 
+# Copy the full ID without a newline, keeping utility output out of the terminal.
+copy_id() {
+    local platform clipboard status
+    platform=$(uname -s 2>/dev/null)
+    case "$platform" in
+        Linux) clipboard=wl-copy ;;
+        Darwin) clipboard=pbcopy ;;
+        *) message="$(sanitize "Copy failed: unsupported platform ${platform:-unknown}")"; return ;;
+    esac
+    if ! command -v "$clipboard" >/dev/null 2>&1; then
+        message="Copy failed: $clipboard not found"; return
+    fi
+    if printf '%s' "$1" | "$clipboard" >/dev/null 2>&1; then
+        message="$(sanitize "Copied issue ID: $1")"
+    else
+        status=$?
+        message="Copy failed: $clipboard (exit $status)"
+    fi
+}
+
 # Give the configured pager normal terminal input and a sanitized issue snapshot.
 show_details() {
     local content pager="${PAGER:-}" status=0 default_pager=0
@@ -386,7 +408,7 @@ render() {
         done
         put "$((height-1))" 1 "$columns" "$mode: j/k scroll | Escape/q return"
     else
-        put 2 1 "$columns" 'g group c add column C auto | f filter F clear | v archives i icebox w wrap width'
+        put 2 1 "$columns" 'g group + add column C auto | f filter F clear | v archives i icebox w wrap width'
         visible=$((columns/28)); (( visible > 0 )) || visible=1
         (( visible <= ${#names[@]} )) || visible=${#names[@]}
         width=$((columns/visible))
@@ -427,7 +449,7 @@ render() {
                 put "$((4+row))" "$x" "$((width-1))" "${lines[row+first]}" "${styles[row+first]}"
             done
         done
-        put "$((height-1))" 1 "$columns" 'arrows/hjkl | Enter details | m move n new s set e edit a archive r refresh ? help q quit'
+        put "$((height-1))" 1 "$columns" 'arrows/hjkl | Enter details c copy ID | m move n new s set e edit a archive r refresh ? help q quit'
     fi
     put "$height" 1 "$columns" "$message"
     printf '%s' "$frame"
@@ -468,7 +490,7 @@ configure() {
             if [[ ! "$value" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then message='Invalid grouping field'; return; fi
             case "$value" in deps|links|tags) message='Grouping requires a scalar field'; return ;; esac
             group=$value; explicit=() ;;
-        c)
+        +)
             prompt 'Add column value (C resets): ' || return
             if [[ -z "$answer" || "$answer" =~ ^\[.*\]$ ]]; then message='Column values must be nonempty scalars'; return; fi
             if [[ "$group" == status ]]; then
@@ -581,13 +603,14 @@ while :; do
         down|j) card=$((card+1)); clamp_card ;;
         up|k) (( card > 0 )) && card=$((card-1)) ;;
         r) message=Refreshed; refresh || : ;;
-        g|c|C|f|F|v|i|w) configure "$key" ;;
+        g|+|C|f|F|v|i|w) configure "$key" ;;
         '?') mode=help; open_view "$(usage)" ;;
         n) if prompt 'New title: ' && [[ -n "$answer" ]]; then mutate create -- "$answer"; fi ;;
-        enter|m|s|e|a)
+        enter|c|m|s|e|a)
             if [[ -z "$selected" ]]; then message='No issue selected'; continue; fi
             case "$key" in
                 enter) show_details "$selected" ;;
+                c) copy_id "$selected" ;;
                 m) move_card "$selected" ;;
                 s) if prompt 'Set key=value: '; then mutate set "$selected" "$answer"; fi ;;
                 e)

@@ -180,7 +180,7 @@ class BoardTests(unittest.TestCase):
         settings = []
         if group is not None:
             settings.append("g" + group + "\r")
-        settings.extend("c" + value + "\r" for value in columns)
+        settings.extend("+" + value + "\r" for value in columns)
         settings.extend("f" + value + "\r" for value in filters)
         settings.extend(
             "v" for _ in range({"active": 0, "all": 1, "archived": 2}[archive])
@@ -249,8 +249,8 @@ class BoardTests(unittest.TestCase):
         for keys, visible, other in (
             ("i", True, False),
             ("i", False, False),
-            ("cclosed\r", False, True),
-            ("cicebox\r", True, True),
+            ("+closed\r", False, True),
+            ("+icebox\r", True, True),
             ("i", False, True),
             ("C", False, False),
         ):
@@ -509,6 +509,83 @@ class BoardTests(unittest.TestCase):
         terminal.expect("open (1)")
         terminal.send("q")
         terminal.finish()
+
+    def test_copy_full_selected_id_and_clipboard_failures(self) -> None:
+        """Copy exact selected IDs; unavailable clipboards must leave the board usable."""
+        first = self._issue("first-1234")
+        second = self._issue("second-1234")
+        before = {path: path.read_bytes() for path in (first, second)}
+        tools = self.workspace / "clipboard-tools"
+        tools.mkdir()
+        for command in (
+            "bash",
+            "dirname",
+            "readlink",
+            "jq",
+            "stty",
+            "tput",
+            "awk",
+            "cat",
+        ):
+            executable = shutil.which(command)
+            self.assertIsNotNone(executable, command)
+            (tools / command).symlink_to(executable)
+        self.environment["PATH"] = str(tools)
+        for platform, command, outcome in (
+            ("Linux", "wl-copy", "success"),
+            ("Darwin", "pbcopy", "success"),
+            ("Linux", "wl-copy", "failure"),
+            ("Darwin", "pbcopy", "failure"),
+            ("Linux", "wl-copy", "missing"),
+            ("Darwin", "pbcopy", "missing"),
+            ("FreeBSD", "", "unsupported"),
+        ):
+            with self.subTest(platform=platform, outcome=outcome):
+                uname = tools / "uname"
+                uname.write_text(f"#!/usr/bin/env bash\nprintf '%s\\n' {platform}\n")
+                uname.chmod(0o755)
+                for utility in ("wl-copy", "pbcopy"):
+                    capture = self.workspace / f"copied-{utility}"
+                    capture.unlink(missing_ok=True)
+                    script = tools / utility
+                    script.unlink(missing_ok=True)
+                    if outcome == "missing" and utility == command:
+                        continue
+                    script.write_text(
+                        f"#!/usr/bin/env bash\ncat > copied-{utility}\n"
+                        "printf 'CLIPBOARD_STDOUT\\n'\n"
+                        "printf '\\033]2;CLIPBOARD_STDERR\\007' >&2\n"
+                        f"exit {7 if outcome == 'failure' else 0}\n"
+                    )
+                    script.chmod(0o755)
+                terminal = self._terminal()
+                terminal.frame("q quit")
+                terminal.send("jc")
+                if outcome == "success":
+                    status = "Copied issue ID: second-1234"
+                elif outcome == "failure":
+                    status = f"Copy failed: {command} (exit 7)"
+                elif outcome == "missing":
+                    status = f"Copy failed: {command} not found"
+                else:
+                    status = "Copy failed: unsupported platform FreeBSD"
+                frame = terminal.frame(status)
+                self.assertIn("\x1b[30;1H", frame)
+                for utility in ("wl-copy", "pbcopy"):
+                    capture = self.workspace / f"copied-{utility}"
+                    if utility == command and outcome in ("success", "failure"):
+                        self.assertEqual(capture.read_bytes(), b"second-1234")
+                    else:
+                        self.assertFalse(capture.exists())
+                terminal.send("lc")
+                terminal.frame("No issue selected")
+                terminal.send("hr")
+                terminal.frame("Refreshed")
+                self.assertNotIn(b"CLIPBOARD_STDOUT", terminal.output)
+                self.assertNotIn(b"CLIPBOARD_STDERR", terminal.output)
+                terminal.send("q")
+                terminal.finish()
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_invalid_group_retains_current_view(self) -> None:
         """An unsupported list grouping leaves the previous board usable."""

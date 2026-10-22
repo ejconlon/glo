@@ -311,16 +311,16 @@ then press `f`, type `type=epic`, and press Enter. Escape cancels a prompt.
   `plan` uses `create`, `review`, `reject`, `accept`. Other scalar fields
   discover existing values in alphabetical order. Changing the group resets
   custom columns and keeps filters.
-- **Columns:** `c` adds a column value. The first addition replaces automatic
+- **Columns:** `+` adds a column value. The first addition replaces automatic
   columns; subsequent additions append in order, including empty destinations.
-  `C` resets columns to their automatic order; use `C` then `c` to start a
+  `C` resets columns to their automatic order; use `C` then `+` to start a
   different custom list. For example, group by `team`, then add `core` and `tools`.
   List-valued grouping is rejected. Missing or empty values appear in **Unassigned**;
   unlisted values appear in **Other**. These are display buckets, not move
   destinations; use attribute editing to set an empty value.
 - **Icebox:** `i` toggles the icebox column on status boards. It starts hidden,
   and hidden iceboxed cards do not appear under **Other**. Adding `icebox`
-  with `c` also shows it. Resetting columns keeps the icebox visibility choice.
+  with `+` also shows it. Resetting columns keeps the icebox visibility choice.
   This setting applies only to status grouping; other groups include matching
   iceboxed issues normally.
 - **Filters:** `f` adds a literal `key=value` filter; repeat it to require all
@@ -346,6 +346,9 @@ then press `f`, type `type=epic`, and press Enter. Escape cancels a prompt.
   to search and scroll, then quit it to return to the board. `?` opens built-in
   help (`j/k` scroll, Escape or `q` returns); `q` on the board exits.
   Narrow terminals scroll columns horizontally.
+- **Clipboard:** `c` copies the selected full issue ID without a trailing newline,
+  using `wl-copy` on Linux or `pbcopy` on Darwin. The status line reports success,
+  missing commands, command failures, unsupported platforms, or an empty selection.
 - **Pager:** `$PAGER` overrides the details viewer. Otherwise, use `bat` when
   it is on `PATH`, with Markdown highlighting and `--style=plain --wrap=never`.
   Bat passes complete source lines to `less -R --wordwrap -+S`, which wraps at
