@@ -2594,7 +2594,8 @@ deps_satisfied() {
     return 0
 }
 
-# Run a task in the background
+# Run a task in the background without access to the coordinator's input.
+# Job control otherwise lets terminal probes suspend the worker with SIGTTIN.
 run_task() {
     local task_id="$1"
     local clean_id="${task_id#/}"  # Strip leading /
@@ -2605,7 +2606,7 @@ run_task() {
         # Run in nested subshell so set -e in function works, then capture exit code
         ($func_name) > "$output_file" 2>&1
         echo "$?" > "$STATUS_DIR/${task_id//\\//_}"
-    ) &
+    ) </dev/null &
     PIDS[$task_id]=$!
     STARTED[$task_id]=1
     ((RUNNING++))

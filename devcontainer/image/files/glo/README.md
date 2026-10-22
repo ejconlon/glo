@@ -523,6 +523,11 @@ changes elsewhere, such as shared workspace config or Glo itself, do not
 automatically select projects. No matching projects means no tasks run.
 `--dryrun` prints the planned task scripts without executing them.
 
+Parallel workers receive `/dev/null` as standard input. They cannot consume
+the caller's input or be suspended by terminal reads while running in the
+background. Commands that need interactive or piped input must run in the
+foreground: select a single task, or use `-j1` for sequential execution.
+
 Haskell formatting uses Fourmolu for `src/`, `test/`, and `app/`. Glo selects
 `fourmolu.yaml` next to the project's `build.json` first, then falls back to
 `config/hs/fourmolu.yaml` in the workspace. It passes the selected file explicitly;
