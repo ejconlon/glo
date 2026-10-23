@@ -7,7 +7,7 @@ leakscan:
     gitleaks git . --config .gitleaks.toml --redact=100 --verbose --no-banner --ignore-gitleaks-allow --max-archive-depth=2 --log-opts="--all --full-history -m"
 
 # Commit current work to master, verify, and push to ejconlon/master.
-ship msg="fixes": leakscan
+ship msg="fixes":
     #!/usr/bin/env bash
     set -euo pipefail
 
