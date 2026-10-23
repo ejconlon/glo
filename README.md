@@ -123,3 +123,19 @@ background process. `glo garage run` requires an absolute
 foreground for container use.
 
 For host-local dependencies, run `bin/glo-local --dry-run all` to inspect the installer, then run the specific subcommands you need. `glo-local` supports Arch Linux via `pacman` and macOS via `brew`.
+
+## Secret Scanning
+
+The devcontainer includes Gitleaks 8.30.1 by default, installed from upstream
+release archives with pinned SHA-256 checksums for x86-64 and ARM64.
+Set the build argument `GITLEAKS_ENABLED=0` to omit it.
+
+Run `just leakscan` from this checkout inside the devcontainer, or on a host
+with Gitleaks installed.
+It scans working files, including untracked and ignored files, and all locally
+available Git history, including merges. Findings are redacted and fail the
+command. `.gitleaks.toml` extends the default rules with narrow exceptions for
+SecretSpec release checksums and identifiers in the installed license database.
+
+`just ship` requires this scan to pass before committing and repeats it after
+merging and integration tests, before pushing.

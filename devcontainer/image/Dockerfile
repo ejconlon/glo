@@ -223,6 +223,31 @@ RUN if [ "${JUST_ENABLED}" = "1" ]; then \
     just --version; \
     fi
 
+# Install Gitleaks from checksummed upstream release archives.
+ARG GITLEAKS_ENABLED=1
+ARG GITLEAKS_VERSION=8.30.1
+ARG GITLEAKS_SHA256_X64=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+ARG GITLEAKS_SHA256_ARM64=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
+RUN if [ "${GITLEAKS_ENABLED}" = "1" ]; then \
+    set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) gitleaks_arch="x64"; checksum="${GITLEAKS_SHA256_X64}" ;; \
+        aarch64) gitleaks_arch="arm64"; checksum="${GITLEAKS_SHA256_ARM64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${gitleaks_arch}.tar.gz"; \
+    curl -fsSLo /tmp/gitleaks.tar.gz "${url}"; \
+    echo "${checksum}  /tmp/gitleaks.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/gitleaks-dist; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-dist gitleaks LICENSE; \
+    install -m 0755 /tmp/gitleaks-dist/gitleaks /usr/local/bin/gitleaks; \
+    install -d /usr/local/share/licenses/gitleaks; \
+    install -m 0644 /tmp/gitleaks-dist/LICENSE /usr/local/share/licenses/gitleaks/LICENSE; \
+    rm -rf /tmp/gitleaks-dist /tmp/gitleaks.tar.gz; \
+    gitleaks version; \
+    fi
+
 # Install bat (cat clone with syntax highlighting) from GitHub releases.
 ARG BAT_ENABLED=1
 ARG BAT_VERSION=0.26.1

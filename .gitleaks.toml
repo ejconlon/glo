@@ -1,0 +1,21 @@
+title = "Glo secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "SecretSpec release checksums in the devcontainer build"
+condition = "AND"
+paths = ['''^devcontainer/image/Dockerfile$''']
+regexTarget = "match"
+regexes = ['''^SECRETSPEC_SHA256_(X64|ARM64)=[0-9a-f]{64}$''']
+
+[[rules.allowlists]]
+description = "License identifiers in the installed license-expression database"
+condition = "AND"
+paths = ['''^devcontainer/image/files/glo/lib/build/\.venv/lib/python[^/]+/site-packages/license_expression/data/scancode-licensedb-index\.json$''']
+regexTarget = "match"
+regexes = ['''^(spdx_)?license_key": "[A-Za-z0-9._+-]+"$''']
