@@ -4,15 +4,19 @@ set -euo pipefail
 _GLO_BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
 GHC_VERSION="9.14.1"
-CABAL_VERSION="3.16.1.0"
+CABAL_VERSION="3.18.2.0"
 STACK_VERSION="3.11.1"
-HLS_VERSION="2.14.0.0"
+HLS_VERSION="2.15.0.0"
+FOURMOLU_VERSION="0.21.0.0"
+HLINT_VERSION="3.10"
+HLINT_GHC_VERSION="9.12.4"
+HLINT_SOURCE_SHA256="d99672337c06b455884ac14418d562701143141d0d7e46af476817c2ae3efe37"
 WASM_GHC_FLAVOUR="9.14"
 WASM_GHC_META_REF="master"
-RUST_VERSION="1.97.1"
-CARGO_BINSTALL_VERSION="1.21.1"
+RUST_VERSION="1.100.0"
+CARGO_BINSTALL_VERSION="1.27.0"
 CARGO_RUN_BIN_VERSION="1.7.5"
-NODE_VERSION="latest LTS"
+NODE_VERSION="26.13.1"
 ROCQ_VERSION="9.2.0"
 ROCQ_OCAML_VERSION="5.5.0"
 VSROCQ_LANGUAGE_SERVER_PACKAGE="vsrocq-language-server"
@@ -209,8 +213,9 @@ ensure_ghcup() {
     command -v ghcup >/dev/null 2>&1 || die "ghcup was not found after package install. Install ghcup, then rerun 'glo-local hs'."
 }
 
-link_latest_ghcup_tool() {
+link_ghcup_tool() {
     local tool="$1"
+    local version="$2"
     local target=""
     local dest=""
 
@@ -221,10 +226,7 @@ link_latest_ghcup_tool() {
         dest="/usr/local/bin/${tool}"
     fi
 
-    target="$(command -v "${tool}" 2>/dev/null || true)"
-    if [[ -z "$target" ]]; then
-        target="$(compgen -c | grep -E "^${tool}-[0-9]" | sort -V | tail -1 || true)"
-    fi
+    target="$(command -v "${tool}-${version}" 2>/dev/null || true)"
     [[ -n "$target" ]] || return 0
     target="$(command -v "$target")"
 
@@ -237,6 +239,25 @@ link_latest_ghcup_tool() {
     fi
 }
 
+# HLint publishes x86_64 binaries only; compile its checked source on ARM.
+install_hlint_source() {
+    local workdir ghcup_bin build_locale
+    workdir="$(mktemp -d "${TMPDIR:-/tmp}/glo-hlint.XXXXXX")"
+    trap 'rm -rf "${workdir:-}"' RETURN
+    ghcup_bin="${GHCUP_INSTALL_BASE_PREFIX:-$HOME}/.ghcup/bin"
+    build_locale=C.utf8
+    [[ "$OS" == "macos" ]] && build_locale=en_US.UTF-8
+    run ghcup install ghc "$HLINT_GHC_VERSION"
+    run curl -fsSLo "$workdir/hlint.tar.gz" \
+        "https://hackage.haskell.org/package/hlint-${HLINT_VERSION}/hlint-${HLINT_VERSION}.tar.gz"
+    verify_archive "$workdir/hlint.tar.gz" "$HLINT_SOURCE_SHA256"
+    run tar -xzf "$workdir/hlint.tar.gz" -C "$workdir"
+    run cabal update
+    run env LC_ALL="$build_locale" cabal install --ignore-project "$workdir/hlint-${HLINT_VERSION}" \
+        --with-compiler="ghc-${HLINT_GHC_VERSION}" --installdir="$ghcup_bin" \
+        --install-method=copy --overwrite-policy=always --program-suffix="-${HLINT_VERSION}"
+}
+
 install_hs() {
     log "Installing Haskell toolchain via ghcup"
     ensure_ghcup
@@ -245,10 +266,14 @@ install_hs() {
     run ghcup install stack "$STACK_VERSION" --set
     run ghcup install hls "$HLS_VERSION" --set
     run ghcup config add-release-channel 3rdparty
-    run ghcup install fourmolu
-    run ghcup install hlint
-    link_latest_ghcup_tool fourmolu
-    link_latest_ghcup_tool hlint
+    run ghcup install fourmolu "$FOURMOLU_VERSION"
+    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+        install_hlint_source
+    else
+        run ghcup install hlint "$HLINT_VERSION"
+    fi
+    link_ghcup_tool fourmolu "$FOURMOLU_VERSION"
+    link_ghcup_tool hlint "$HLINT_VERSION"
 }
 
 install_wasm() {
@@ -481,9 +506,9 @@ install_ts() {
     [[ "$TS_DONE" -eq 1 ]] && return
     log "Installing TypeScript/Node tooling via nvm (${NODE_VERSION})"
     ensure_nvm
-    without_nounset run nvm install --lts
-    without_nounset run nvm alias default 'lts/*'
-    without_nounset run nvm use --lts
+    without_nounset run nvm install "$NODE_VERSION"
+    without_nounset run nvm alias default "$NODE_VERSION"
+    without_nounset run nvm use "$NODE_VERSION"
     TS_DONE=1
 }
 

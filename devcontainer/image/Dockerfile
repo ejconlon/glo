@@ -1,4 +1,4 @@
-FROM docker.io/rockylinux/rockylinux:10.2-minimal
+FROM docker.io/rockylinux/rockylinux:10.3.20261112.0-minimal@sha256:f819149e93579b96a7e2fb7286dae4756173de68aafcc78e7e659650c6867b7b
 
 USER root
 WORKDIR /root
@@ -40,6 +40,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         inotify-tools \
         jq \
         less \
+        libatomic \
         pv \
         pkgconf-pkg-config \
         procps-ng \
@@ -49,7 +50,7 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
         readline \
         rsync \
         ripgrep \
-        shellcheck \
+        ShellCheck \
         sqlite \
         sqlite-devel \
         strace \
@@ -75,18 +76,18 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
 # Build Caddy with the pinned Layer 4 module using a temporary Go toolchain.
 # The default image contains no Caddy executable.
 ARG CADDY_ENABLED=0
-# Caddy v2.11.4.
-ARG CADDY_COMMIT=e2eee6a7fce366321294c9c2a79f3146891dcbdf
-ARG CADDY_SOURCE_SHA256=a593bd7077c76102ca76d19287a5e247d4e359dd67eddbc933f865afd3c131eb
-# caddy-l4 v0.1.2.
-ARG CADDY_L4_COMMIT=42db5690dea199f930a6f08005fe2e4aab10dcc9
-ARG CADDY_L4_SOURCE_SHA256=a2def12c2a1c45b859c1412fa520f4fa1b630cc2ba69a6a254f58051080942a1
-# xcaddy v0.4.5.
-ARG XCADDY_COMMIT=328cac711a1fe80041c3b79db2dfbb4e10330a05
-ARG XCADDY_SOURCE_SHA256=23dbf0f640a1eb6ae560d014f2c8f57cbe0ae740cdf874f3e712fe0286c8a6ab
-ARG CADDY_GO_VERSION=1.25.14
-ARG CADDY_GO_SHA256_X64=a21ae5633a269bcd7e90cf767e48225633795e99d831742cbf3397064fee7712
-ARG CADDY_GO_SHA256_ARM64=9bf234ea70ffec9347fdf6b22ce4add51717d3386a38a441e8c8743fceb5eaee
+# Caddy v2.11.9.
+ARG CADDY_COMMIT=0d98caea58f794f88e709b1bef2880996a471bca
+ARG CADDY_SOURCE_SHA256=7b8de20699ec38a43c97d70dd5347ed8e19d3db96d0c9d76ded020f018cb6e5e
+# caddy-l4 v0.1.3.
+ARG CADDY_L4_COMMIT=eafc300ef23bcb2a28cc329a18e1e98bcd2b7cee
+ARG CADDY_L4_SOURCE_SHA256=18b9c1280e292a8970586c270ac96e52cd2c6f6f419e23fdb50125c9035679d1
+# xcaddy v0.4.7.
+ARG XCADDY_COMMIT=e0e8f68a0f4bef11bfd04c4fb3091052ad36132f
+ARG XCADDY_SOURCE_SHA256=3f739ceb6cf2cf2eb2dd8e8004e31543ad6862b2824b2fd68be2c517c90b1c49
+ARG CADDY_GO_VERSION=1.27.4
+ARG CADDY_GO_SHA256_X64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+ARG CADDY_GO_SHA256_ARM64=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 RUN if [ "${CADDY_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -146,9 +147,9 @@ RUN if [ "${CADDY_ENABLED}" = "1" ]; then \
 # Install Garage from the official checksummed release binaries.
 # The default image contains no Garage executable.
 ARG GARAGE_ENABLED=0
-ARG GARAGE_VERSION=2.3.0
-ARG GARAGE_SHA256_X64=f98d317942bb341151a2775162016bb50cf86b865d0108de03eb5db16e2120cd
-ARG GARAGE_SHA256_ARM64=8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2
+ARG GARAGE_VERSION=2.5.0
+ARG GARAGE_SHA256_X64=2ff667286217cd73ebcb1c03af993822365000441dfe31a80cb64c5189a9dea8
+ARG GARAGE_SHA256_ARM64=69b6040cef428b993500c17dd0d0c1240acf2f3f667b9b05ceba4b9660db4e8c
 RUN if [ "${GARAGE_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -168,9 +169,9 @@ RUN if [ "${GARAGE_ENABLED}" = "1" ]; then \
 # Install an explicit PostgreSQL 18 client, server, and development boundary.
 # The default image contains no PostgreSQL packages or initialized cluster.
 ARG POSTGRES_ENABLED=0
-ARG PGDG_REPO_RPM_VERSION=42.0-69
-ARG PGDG_REPO_SHA256_X64=6f6272b26ec3a26f2701ed47c69c580691affdf59ef26fa5a9c5a78f94f40a5d
-ARG PGDG_REPO_SHA256_ARM64=494f3404ee8a3803d40a494d261c9da7b6d49fab65e7c5753946df8102553960
+ARG PGDG_REPO_RPM_VERSION=42.0-70
+ARG PGDG_REPO_SHA256_X64=7cf263def272972281df755a31487b0eadabc91c424962705820435a90621a06
+ARG PGDG_REPO_SHA256_ARM64=f52f305b4e2ead1db2614bd923e7d987c9821d0331c4bf3561a23ca4c634613b
 # The common repository retains versioned RPMs; reporpms only keeps the latest.
 RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
     --mount=type=cache,target=/var/lib/dnf,id=dnf-lib-dev,sharing=locked \
@@ -197,15 +198,44 @@ RUN --mount=type=cache,target=/var/cache/dnf,id=dnf-cache-dev,sharing=locked \
 
 ENV PATH="/usr/pgsql-18/bin:${PATH}"
 
-# Upgrade pip and install uv
-RUN python3 -m pip install --no-cache-dir --upgrade pip \
-    && python3 -m pip install --no-cache-dir uv
+# Use Python 3.14 for development; Rocky's /usr/bin/python3 remains available to RPM tools.
+ARG PYTHON_VERSION=3.14.10
+ARG PYTHON_BUILD_VERSION=20261110
+ARG PYTHON_SHA256_X86_64=c2ff2e97422f5d3896a16e0317fd212ba977bbf2688d93a6f7a03d817506bd30
+ARG PYTHON_SHA256_AARCH64=38fd50f07170adc29d481913d1c30b17ecb538fbe290315fe1f83d84fdd5b694
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch}" in \
+        x86_64) checksum="${PYTHON_SHA256_X86_64}" ;; \
+        aarch64) checksum="${PYTHON_SHA256_AARCH64}" ;; \
+        *) echo "Unsupported architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/python.tar.gz \
+        "https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_VERSION}/cpython-${PYTHON_VERSION}%2B${PYTHON_BUILD_VERSION}-${arch}-unknown-linux-gnu-install_only_stripped.tar.gz"; \
+    echo "${checksum}  /tmp/python.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/python.tar.gz -C /opt; \
+    rm /tmp/python.tar.gz
+
+ENV PATH="/opt/python/bin:${PATH}"
+
+# Install the selected Python tools from checksummed wheels into Python 3.14.
+ARG PIP_VERSION=26.3
+ARG PIP_SHA256=f3b60b20ffaadd4415ed7957212a38ac63fa4c5fa375bd0f4a797777940fad13
+ARG UV_VERSION=0.13.9
+ARG UV_SHA256_X64=d7f459fe4fd247d830351c75686d3996ace3c6f3f728eb0e85a30b7ada0cef19
+ARG UV_SHA256_ARM64=ecb6028d79dc96fbeafffe5c8af62a7099487ebc05a701e76714eebcffd06375
+RUN printf 'pip==%s --hash=sha256:%s\nuv==%s --hash=sha256:%s --hash=sha256:%s\n' \
+        "${PIP_VERSION}" "${PIP_SHA256}" "${UV_VERSION}" "${UV_SHA256_X64}" "${UV_SHA256_ARM64}" \
+        > /tmp/python-tools.txt \
+    && python3 -m pip install --no-cache-dir --upgrade --only-binary=:all: \
+        --require-hashes -r /tmp/python-tools.txt \
+    && rm /tmp/python-tools.txt
 
 # Install just from GitHub releases.
 ARG JUST_ENABLED=1
-ARG JUST_VERSION=1.58.0
-ARG JUST_SHA256_X86_64=4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d
-ARG JUST_SHA256_AARCH64=748237128c4c40cbdabc65e841d05ceba13cc23a91eaba395495894c1d9764df
+ARG JUST_VERSION=1.59.0
+ARG JUST_SHA256_X86_64=409044617b6f06517c1035e55ca38c8c856ff8b650e41bc2aa1ef82d5903a23e
+ARG JUST_SHA256_AARCH64=23871b1702bfd550fb5f901778fd4290ecf2ee034a45a889fbe96d89b188086d
 RUN if [ "${JUST_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -272,9 +302,9 @@ RUN if [ "${BAT_ENABLED}" = "1" ]; then \
 
 # Install fd (fast find alternative) from GitHub releases.
 ARG FD_ENABLED=1
-ARG FD_VERSION=10.4.2
-ARG FD_SHA256_X64=e3257d48e29a6be965187dbd24ce9af564e0fe67b3e73c9bdcd180f4ec11bdde
-ARG FD_SHA256_ARM64=f32d3657473fba74e2600babc8db0b93420d51169223b7e8143b2ed55d8fd9e8
+ARG FD_VERSION=10.5.2
+ARG FD_SHA256_X64=7e2d07fa2b8807642aaec67b7e2972a9fbe4db26fcb340a7372392db42b26694
+ARG FD_SHA256_ARM64=63ea52cb31586e6d98efa2f06d73d542f16c7d0c4af0f07b579aaf9714cf907a
 RUN if [ "${FD_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -294,9 +324,9 @@ RUN if [ "${FD_ENABLED}" = "1" ]; then \
 
 # Install zk (Zettelkasten note-taking assistant) from GitHub releases.
 ARG ZK_ENABLED=1
-ARG ZK_VERSION=0.15.6
-ARG ZK_SHA256_X64=50b2f0a8c533d607e5a8a1f478fe78d5585317178bd86456659c049965a8945d
-ARG ZK_SHA256_ARM64=80550e5ab50b826fef660e72fc6c7c8c872ad8673ffb798dabc32c714f63fdd5
+ARG ZK_VERSION=0.15.7
+ARG ZK_SHA256_X64=9339cf4643159cfc80ee6b9c232abf84076ea154a057bf8926eb71cab37d3abe
+ARG ZK_SHA256_ARM64=8404716171c04e131759feebb551e5946162732f20c178cc38099af10d0ce800
 RUN if [ "${ZK_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -340,19 +370,22 @@ RUN if [ "${SECRETSPEC_ENABLED}" = "1" ]; then \
     rm -rf /tmp/secretspec-dist; \
     fi
 
-# Install Node.js via nvm using the latest LTS line.
-ARG NVM_VERSION=0.40.6
+# Install the selected Node.js LTS release and its bundled npm via nvm.
+ARG NVM_VERSION=0.41.0
+ARG NVM_SOURCE_SHA256=532560c9ecc6ef484279fcc1c600e9346537bc7913b891ffd0ec0caca5072694
+ARG NODE_VERSION=26.13.1
 ENV NVM_DIR=/usr/local/nvm
 RUN set -eux; \
     mkdir -p "${NVM_DIR}"; \
-    curl -fsSLo /tmp/install-nvm.sh "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh"; \
-    bash /tmp/install-nvm.sh; \
-    rm -f /tmp/install-nvm.sh; \
+    curl -fsSLo /tmp/nvm.tar.gz "https://codeload.github.com/nvm-sh/nvm/tar.gz/refs/tags/v${NVM_VERSION}"; \
+    echo "${NVM_SOURCE_SHA256}  /tmp/nvm.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/nvm.tar.gz -C "${NVM_DIR}" --strip-components=1; \
+    rm -f /tmp/nvm.tar.gz; \
     set +u; \
     . "${NVM_DIR}/nvm.sh"; \
-    nvm install --lts; \
-    nvm alias default 'lts/*'; \
-    nvm use --silent --lts; \
+    nvm install "${NODE_VERSION}"; \
+    nvm alias default "${NODE_VERSION}"; \
+    nvm use --silent default; \
     ln -sfn "$(dirname "$(dirname "$(command -v node)")")" "${NVM_DIR}/default"; \
     set -u; \
     chmod -R a+rX "${NVM_DIR}"; \
@@ -361,11 +394,11 @@ RUN set -eux; \
 
 # Install rustup and Rust toolchain from GitHub releases with SHA256 verification
 ARG RUST_ENABLED=0
-ARG RUSTUP_VERSION=1.29.0
-ARG RUSTUP_SHA256_X64=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
-ARG RUSTUP_SHA256_ARM64=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792
-ARG RUST_VERSION=1.97.1
-ARG CARGO_BINSTALL_VERSION=1.21.1
+ARG RUSTUP_VERSION=1.29.3
+ARG RUSTUP_SHA256_X64=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
+ARG RUSTUP_SHA256_ARM64=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282
+ARG RUST_VERSION=1.100.0
+ARG CARGO_BINSTALL_VERSION=1.27.0
 ARG CARGO_RUN_BIN_VERSION=1.7.5
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -399,7 +432,7 @@ RUN if [ "${RUST_ENABLED}" = "1" ]; then \
 ARG PURESCRIPT_ENABLED=0
 RUN if [ "${PURESCRIPT_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
-    nvm use --silent --lts; \
+    nvm use --silent default; \
     npm install -g purescript spago purs-tidy; \
     fi
 
@@ -411,9 +444,13 @@ ARG GHCUP_VERSION=0.2.6.2
 ARG GHCUP_SHA256_X64=9ed5da5449b48043a0d17e767c05d2ef585e25a639bb934329496c6d2fad9cf8
 ARG GHCUP_SHA256_ARM64=65a5f05120288ee4f1a81d28825374b6af317456a351a586adfce90c6dc29e3b
 ARG GHC_VERSION=9.14.1
-ARG CABAL_VERSION=3.16.1.0
+ARG CABAL_VERSION=3.18.2.0
 ARG STACK_VERSION=3.11.1
-ARG HLS_VERSION=2.14.0.0
+ARG HLS_VERSION=2.15.0.0
+ARG FOURMOLU_VERSION=0.21.0.0
+ARG HLINT_VERSION=3.10
+ARG HLINT_GHC_VERSION=9.12.4
+ARG HLINT_SOURCE_SHA256=d99672337c06b455884ac14418d562701143141d0d7e46af476817c2ae3efe37
 ENV GHCUP_INSTALL_BASE_PREFIX=/usr/local
 RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     set -eux; \
@@ -434,10 +471,30 @@ RUN if [ "${HASKELL_ENABLED}" = "1" ]; then \
     ghcup install stack "${STACK_VERSION}" --set; \
     ghcup install hls "${HLS_VERSION}" --set; \
     ghcup config add-release-channel 3rdparty; \
-    ghcup install fourmolu; \
-    ghcup install hlint; \
-    ln -sf /usr/local/.ghcup/bin/fourmolu-* /usr/local/bin/fourmolu; \
-    ln -sf /usr/local/.ghcup/bin/hlint-* /usr/local/bin/hlint; \
+    ghcup install fourmolu "${FOURMOLU_VERSION}"; \
+    if [ "${arch}" = "aarch64" ]; then \
+        ghcup install ghc "${HLINT_GHC_VERSION}"; \
+        curl -fsSLo /tmp/hlint.tar.gz "https://hackage.haskell.org/package/hlint-${HLINT_VERSION}/hlint-${HLINT_VERSION}.tar.gz"; \
+        echo "${HLINT_SOURCE_SHA256}  /tmp/hlint.tar.gz" | sha256sum -c -; \
+        mkdir /tmp/hlint-source; \
+        tar -xzf /tmp/hlint.tar.gz -C /tmp/hlint-source --strip-components=1; \
+        export CABAL_DIR=/tmp/hlint-cabal; \
+        export LC_ALL=C.utf8; \
+        cabal update; \
+        cd /tmp/hlint-source; \
+        cabal install exe:hlint --installdir=/usr/local/.ghcup/bin --install-method=copy \
+            --with-compiler="ghc-${HLINT_GHC_VERSION}" \
+            --program-suffix="-${HLINT_VERSION}"; \
+        cd /root; \
+        rm -rf /tmp/hlint.tar.gz /tmp/hlint-source "${CABAL_DIR}"; \
+        ghcup rm ghc "${HLINT_GHC_VERSION}"; \
+    else \
+        ghcup install hlint "${HLINT_VERSION}"; \
+    fi; \
+    ln -sf "/usr/local/.ghcup/bin/fourmolu-${FOURMOLU_VERSION}" /usr/local/bin/fourmolu; \
+    ln -sf "/usr/local/.ghcup/bin/hlint-${HLINT_VERSION}" /usr/local/bin/hlint; \
+    fourmolu --version; \
+    hlint --version; \
     fi
 
 # Install wasm32-wasi GHC toolchain separately so native ghc/cabal remain the defaults.
@@ -543,9 +600,9 @@ VOLUME ["/home/user/.config", "/home/user/.local/share"]
 #   curl -fsSL "$release_base/VERSION/linux-x64/claude" | sha256sum    # for CLAUDE_SHA256_X64
 #   curl -fsSL "$release_base/VERSION/linux-arm64/claude" | sha256sum  # for CLAUDE_SHA256_ARM64
 ARG CLAUDE_ENABLED=0
-ARG CLAUDE_VERSION=2.1.227
-ARG CLAUDE_SHA256_X64=6832dc3f1797b890b71116e5f2dbbf9a83fd3d0498c235b4b0f9cd0e6e499ad6
-ARG CLAUDE_SHA256_ARM64=db47335532cbcab67a4b3ab16d8f3f77976bf85d53c7d79f8296538aa22bfce6
+ARG CLAUDE_VERSION=2.1.327
+ARG CLAUDE_SHA256_X64=343c744baa14bfd38286a7cb90871051f04379956da6c5b803a9e66019a76ac9
+ARG CLAUDE_SHA256_ARM64=acf0ef2f9da8d5ab08f193f007e19a06cbfb608b96a2f1f758d63a92a386cff8
 RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
     set -eux; \
     arch="$(uname -m)"; \
@@ -569,34 +626,34 @@ RUN if [ "${CLAUDE_ENABLED}" = "1" ]; then \
 ARG GEMINI_ENABLED=0
 RUN if [ "${GEMINI_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
-    nvm use --silent --lts; \
+    nvm use --silent default; \
     npm install -g \
-      @google/gemini-cli@0.54.4; \
+      @google/gemini-cli@0.68.0; \
     fi
 
 # Install codex
 ARG CODEX_ENABLED=0
 RUN if [ "${CODEX_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
-    nvm use --silent --lts; \
+    nvm use --silent default; \
     npm install -g \
-      @openai/codex@0.147.0; \
+      @openai/codex@0.170.0; \
     fi
 
 # Install opencode
 ARG OPENCODE_ENABLED=0
 RUN if [ "${OPENCODE_ENABLED}" = "1" ]; then \
     . "${NVM_DIR}/nvm.sh"; \
-    nvm use --silent --lts; \
+    nvm use --silent default; \
     npm install -g \
-      opencode-ai@1.18.16; \
+      opencode-ai@1.19.6; \
     fi
 
 # Install glo
 COPY files/glo/ /opt/glo/
-RUN UV_PYTHON_INSTALL_DIR=/opt/glo/python \
-    UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
+RUN UV_PROJECT_ENVIRONMENT=/opt/glo/.venv \
     uv sync --project /opt/glo/lib/build --package glo_build --frozen \
+        --python /opt/python/bin/python3 \
     && chown -R user:user /opt/glo
 
 USER user

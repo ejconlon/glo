@@ -735,7 +735,7 @@ native builder.
 
 ## Local Host Tooling
 
-Use `glo-local` outside the devcontainer when you want the host OS to have the same toolchain families as the image. It detects Arch Linux or macOS and installs packages with `pacman` or `brew`. Haskell and Rust versions are pinned to the image versions. On other Linux distributions, only `wasm`, `smt` and `doctor` are supported, assuming base tools are already installed.
+Use `glo-local` outside the devcontainer when you want the host OS to have the same toolchain families as the image. It detects Arch Linux or macOS and installs packages with `pacman` or `brew`. Haskell, Rust, and Node versions are pinned to the image versions. On other Linux distributions, only `wasm`, `smt` and `doctor` are supported, assuming base tools are already installed.
 
 ```sh
 glo-local doctor                  # show detected OS/arch and installed tools
@@ -743,18 +743,28 @@ glo-local --dry-run all           # print install commands without running them
 glo-local need                    # install toolchains enabled by workspace config
 glo-local base                    # common CLI tools
 glo-local py                      # Python and uv
-glo-local rs                      # Rust 1.97.1 + rustfmt/clippy/rust-analyzer/rust-src
-glo-local hs                      # GHC 9.14.1, cabal 3.16.1.0, stack 3.11.1, HLS 2.14.0.0, fourmolu, hlint via ghcup
+glo-local rs                      # Rust 1.100.0 + rustfmt/clippy/rust-analyzer/rust-src
+glo-local hs                      # GHC 9.14.1, cabal 3.18.2.0, stack 3.11.1, HLS 2.15.0.0, Fourmolu 0.21.0.0, HLint 3.10
 glo-local wasm                    # wasm32-wasi GHC, wasm32-wasi-cabal, wasmtime, binaryen
 glo-local rocq                    # Rocq 9.2.0 and companion packages via opam
 glo-local smt                     # checksummed cvc5 1.4.2
-glo-local ts                      # Node/npm
+glo-local ts                      # Node 26.13.1 LTS with bundled npm
 glo-local ps                      # PureScript tooling via npm
 glo-local notes                   # zk/sqlite
 glo-local secretspec              # checksummed Apache-2.0 SecretSpec release
 ```
 
 `glo local ...` is equivalent to `glo-local ...`.
+
+Fourmolu and HLint are pinned to the selected releases. HLint has no upstream
+ARM binary; the image and local installer build its checksummed source on ARM
+with GHC 9.12.4 because its dependencies do not support GHC 9.14. The default
+compiler remains GHC 9.14.1. The image removes the extra compiler after building;
+the local installer retains it for Cabal's build store.
+The image defaults to Python 3.14.10 from checksummed Python standalone archives,
+including Glo's isolated build environment and new project environments. It pins
+pip 26.3 and uv 0.13.9 to checked wheels. Rocky's Python remains available at
+`/usr/bin/python3` for distribution tools. Node 26.13.1 retains its bundled npm.
 
 The image's `SMT_ENABLED=1` and `glo-local smt` install
 [cvc5 1.4.2](https://github.com/cvc5/cvc5/releases/tag/cvc5-1.4.2).

@@ -50,7 +50,10 @@ lifecycle name *args:
   name="$1"
   shift
   uniq=$(printf '%04x%04x' $RANDOM $RANDOM)
-  (just up "$name" "$uniq" && just exec "$name" "$uniq" "$@"); just down "$uniq"
+  status=0
+  (just up "$name" "$uniq" && just exec "$name" "$uniq" "$@") || status=$?
+  just down "$uniq"
+  exit "$status"
 
 # Run claude
 claude *args:

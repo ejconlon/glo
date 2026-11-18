@@ -31,6 +31,9 @@ export GLO_TEST_LOG="$TEST_ROOT/commands.log"
 cat > "$fake_bin/container-command" <<'EOF'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$GLO_TEST_LOG"
+if [[ "$(basename "$0")" == devcontainer && "${1:-}" == exec ]]; then
+    exit "${GLO_TEST_EXEC_STATUS:-0}"
+fi
 EOF
 chmod 755 "$fake_bin/container-command"
 ln -s container-command "$fake_bin/devcontainer"
@@ -55,6 +58,22 @@ PATH="$fake_bin:$PATH" \
 require_log "podman ps -aq --filter label=devcontainer.project=workspace"
 require_log "podman rm -f"
 
+: > "$GLO_TEST_LOG"
+if XDG_RUNTIME_DIR="$TEST_ROOT" PATH="$fake_bin:$PATH" GLO_TEST_EXEC_STATUS=23 \
+    just -f "$DEVCONTAINER_JUSTFILE" --set workspace "$workspace" lifecycle test false \
+    >"$TEST_ROOT/lifecycle-failure.out" 2>&1; then
+    fail "Container lifecycle hid a failed command"
+fi
+require_log "devcontainer exec"
+require_log "podman rm -f"
+
+: > "$GLO_TEST_LOG"
+XDG_RUNTIME_DIR="$TEST_ROOT" PATH="$fake_bin:$PATH" \
+    just -f "$DEVCONTAINER_JUSTFILE" --set workspace "$workspace" lifecycle test true \
+    >"$TEST_ROOT/lifecycle-success.out" 2>&1
+require_log "devcontainer exec"
+require_log "podman rm -f"
+
 if GLO_CONTAINER_ENGINE=containerd \
     just -f "$DEVCONTAINER_JUSTFILE" --set workspace "$workspace" image \
     >"$TEST_ROOT/invalid.out" 2>&1; then
@@ -75,8 +94,6 @@ fi
 grep -Fq "GLO_CONTAINER_ENGINE must be 'podman' or 'docker'" \
     "$TEST_ROOT/postgres-invalid.out"
 
-grep -Fq 'FROM docker.io/rockylinux/rockylinux:10.2-minimal' \
-    "$DOCKERFILE"
 grep -Fxq 'COPY files/glo/ /opt/glo/' "$DOCKERFILE"
 [[ "$(grep -Ec '^COPY .*files/glo' "$DOCKERFILE")" -eq 1 ]] \
     || fail "Glo image resources are split across multiple COPY layers"
