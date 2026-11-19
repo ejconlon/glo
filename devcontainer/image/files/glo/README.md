@@ -615,23 +615,17 @@ Language tools and state:
   with compiled proof artifacts in the project tree.
 - **Metadata (`meta`):** Custom targets and their own state locations.
 
-Rust projects have a standard compilation command, so ordinary crates do not
-need to repeat Cargo recipes in `build.json`:
+Project-specific build and interactive workflows belong in `build.json` custom
+targets. Glo has no built-in `compile`, `ghci`, `repl`, or `release-test` commands.
+For example, a Rust project can explicitly declare a build target:
 
-```sh
-glo-build /lib/example compile debug
-glo-build /lib/example compile release
-glo-build /lib/example compile release x86_64-pc-windows-gnu
-glo-build /lib/example compile release -- --bin app
-glo-build /lib/example release-test -- --test cli
+```json
+{"targets": {"build": [{"doc": "Build this project's binaries."}, {"command": "cargo build"}]}}
 ```
 
-`compile` requires an explicit project and a `debug` or `release` profile. Its
-optional cross environment is passed to Cargo as `--target`; the toolchain,
-linker, and any sysroot must already be configured by the workspace or project.
-Remaining arguments are forwarded to Cargo. `release-test` remains available
-for optimized test execution. A project may override either command with a
-custom target or reference a built-in command while adding arguments.
+Run it with `glo-build /lib/example build`, passing Cargo flags after `--` when
+needed. Project-owned Cargo commands receive the same environment and cache
+management as common Rust checks.
 
 Rust commands that can produce build artifacts also keep each project's complete
 `.glo/venv/<name>/target` tree bounded. Glo records target-producing invocations

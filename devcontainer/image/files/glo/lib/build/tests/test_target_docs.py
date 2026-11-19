@@ -10,6 +10,53 @@ import pytest
 from glo_build import cli
 
 
+@pytest.mark.parametrize("language", ["py", "rs", "hs", "ps", "ts", "rocq"])
+@pytest.mark.parametrize("name", ["compile", "ghci", "repl", "release-test"])
+def test_removed_language_shortcuts_are_not_advertised_or_executable(
+    tmp_path: Path, monkeypatch, capsys, language: str, name: str
+) -> None:
+    """Unsupported shortcuts must fail instead of planning a tool or a no-op."""
+    project = write_project(tmp_path, {})
+    (project / "build.json").write_text(json.dumps({"language": language}))
+    monkeypatch.setattr(sys, "argv", ["glo-build"])
+    assert cli.main(tmp_path) == 0
+    help_text = capsys.readouterr().out
+    assert "Project-specific commands:" not in help_text
+    assert not any(line.split()[:1] == [name] for line in help_text.splitlines())
+    monkeypatch.setattr(sys, "argv", ["glo-build", "--dryrun", "/lib/example", name])
+    assert cli.main(tmp_path) != 0
+    output = capsys.readouterr()
+    assert f"Unknown command: {name}" in output.err
+
+
+@pytest.mark.parametrize("name", ["compile", "ghci", "repl", "release-test"])
+def test_removed_shortcuts_can_only_run_when_defined_by_the_project(
+    tmp_path: Path, monkeypatch, capsys, name: str
+) -> None:
+    """Removing builtins must preserve concrete custom targets with those names."""
+    project = write_project(tmp_path, {name: [{"command": "printf '%s' > result.txt"}]})
+    monkeypatch.setenv("WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "glo-build",
+            "--dryrun",
+            "-j1",
+            "/lib/example",
+            name,
+            "--",
+            "custom implementation",
+        ],
+    )
+    assert cli.main(tmp_path) == 0
+    script = capsys.readouterr().out
+    subprocess.run(
+        ["bash"], input=script, text=True, cwd=tmp_path, check=True, capture_output=True
+    )
+    assert (project / "result.txt").read_text() == "custom implementation"
+
+
 def write_project(root: Path, targets: dict[str, list[dict]]) -> Path:
     """Create a metadata-only project so command tests need no language toolchain."""
     project = root / "lib" / "example"

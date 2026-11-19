@@ -1312,7 +1312,6 @@ class Command:
     name: str
     help: str
     handlers: dict[Lang | None, CommandHandler] = field(default_factory=dict)
-    project_only: bool = False  # True if this command only works on projects
     root_only: bool = False  # True if this command only works at root level
     custom_only: bool = False  # True when projects must declare their own target
     subtargets: tuple[str, ...] = ()  # For meta-commands: run these in sequence
@@ -1333,7 +1332,6 @@ def cli_invocation() -> str:
 def command(
     name: str,
     help: str,  # noqa: A002 - shadowing builtin is fine here
-    project_only: bool = False,
     root_only: bool = False,
     lang: Lang | None = None,
 ) -> Callable[[CommandHandler], CommandHandler]:
@@ -1342,7 +1340,6 @@ def command(
     Args:
         name: Command name
         help: Help text (only used on first registration)
-        project_only: True if command only works on projects
         root_only: True if command only works at root level
         lang: Language this handler is for (None = default for all languages)
     """
@@ -1352,7 +1349,6 @@ def command(
             COMMANDS[name] = Command(
                 name=name,
                 help=help,
-                project_only=project_only,
                 root_only=root_only,
             )
         COMMANDS[name].handlers[lang] = fn
@@ -1365,14 +1361,12 @@ def meta_command(
     name: str,
     help: str,  # noqa: A002
     subtargets: list[str],
-    project_only: bool = False,
     root_only: bool = False,
 ) -> None:
     """Register a meta-command that runs subtargets in sequence."""
     COMMANDS[name] = Command(
         name=name,
         help=help,
-        project_only=project_only,
         root_only=root_only,
         subtargets=tuple(subtargets),
     )
@@ -1468,14 +1462,6 @@ def cmd_clean_py(script: Script, project: Project, args: list[str]) -> None:
     venv = script.workspace_path(project.venv_path)
     script.run(["rm", "-rf", venv])
     script.popd()
-
-
-@command("repl", "Start a REPL", project_only=True, lang=Lang.Python)
-def cmd_repl_py(script: Script, project: Project, args: list[str]) -> None:
-    """Start a Python REPL."""
-    del args  # unused
-    script.info(f"Starting REPL for {project.path}")
-    project.emit_python(script, [])
 
 
 # ---------------------------------------------------------------------------
@@ -1588,14 +1574,6 @@ def cmd_clean_ps(script: Script, project: Project, args: list[str]) -> None:
             cache_dir,
         ]
     )
-
-
-@command("repl", "Start a REPL", project_only=True, lang=Lang.Purescript)
-def cmd_repl_ps(script: Script, project: Project, args: list[str]) -> None:
-    """Start a PureScript REPL."""
-    del args  # unused
-    script.info(f"Starting REPL for {project.path}")
-    project.emit_spago(script, ["repl"])
 
 
 # ---------------------------------------------------------------------------
@@ -1800,21 +1778,6 @@ def cmd_clean_haskell(script: Script, project: Project, args: list[str]) -> None
     script.run(["rm", "-rf", venv])
 
 
-@command("repl", "Start a REPL", project_only=True, lang=Lang.Haskell)
-def cmd_repl_haskell(script: Script, project: Project, args: list[str]) -> None:
-    """Start Haskell REPL with cabal repl."""
-    del args  # unused
-    script.info(f"Starting REPL for {project.path}")
-    project.emit_cabal(script, ["repl"])
-
-
-@command("ghci", "Start GHCi via cabal repl", project_only=True, lang=Lang.Haskell)
-def cmd_ghci_haskell(script: Script, project: Project, args: list[str]) -> None:
-    """Start GHCi with correct venv paths via cabal repl."""
-    script.info(f"Starting GHCi for {project.path}")
-    project.emit_cabal(script, ["repl"] + args)
-
-
 @command("license-check", "Check dependency licenses", lang=Lang.Haskell)
 def cmd_license_check_haskell(
     script: Script, project: Project, args: list[str]
@@ -1870,53 +1833,6 @@ def cmd_unit_rs(script: Script, project: Project, args: list[str]) -> None:
     project.emit_cargo(script, ["test"] + args)
 
 
-@command(
-    "compile",
-    "Compile Rust with a debug or release profile and optional cross environment",
-    project_only=True,
-    lang=Lang.Rust,
-)
-def cmd_compile_rs(script: Script, project: Project, args: list[str]) -> None:
-    """Compile Rust for one profile and optional Cargo target environment."""
-    if not args or args[0] not in ("debug", "release"):
-        usage = (
-            f"[E] Usage: {cli_invocation()} {project.path} "
-            "compile debug|release [crossenv] [cargo arguments...]"
-        )
-        script.raw(f"echo {shquote(usage)} >&2")
-        script.raw("exit 2")
-        return
-
-    profile = args[0]
-    remaining = list(args[1:])
-    cross_environment = None
-    if remaining and not remaining[0].startswith("-"):
-        cross_environment = remaining.pop(0)
-
-    cargo_arguments = ["build"]
-    if profile == "release":
-        cargo_arguments.append("--release")
-    if cross_environment is not None:
-        cargo_arguments.extend(["--target", cross_environment])
-    cargo_arguments.extend(remaining)
-
-    destination = f" for {cross_environment}" if cross_environment is not None else ""
-    script.info(f"Compiling {project.path} ({profile}){destination}")
-    project.emit_cargo(script, cargo_arguments)
-
-
-@command(
-    "release-test",
-    "Run Rust tests with release optimizations",
-    project_only=True,
-    lang=Lang.Rust,
-)
-def cmd_release_test_rs(script: Script, project: Project, args: list[str]) -> None:
-    """Run Rust tests using the release profile."""
-    script.info(f"Release-testing {project.path}")
-    project.emit_cargo(script, ["test", "--release"] + args)
-
-
 @command("clean", "Clean generated files and caches", lang=Lang.Rust)
 def cmd_clean_rs(script: Script, project: Project, args: list[str]) -> None:
     """Clean Rust build artifacts."""
@@ -1925,13 +1841,6 @@ def cmd_clean_rs(script: Script, project: Project, args: list[str]) -> None:
     venv = script.workspace_path(project.venv_path)
     project.emit_cargo(script, ["clean"])
     script.run(["rm", "-rf", venv])
-
-
-@command("repl", "Start a REPL", project_only=True, lang=Lang.Rust)
-def cmd_repl_rs(script: Script, project: Project, args: list[str]) -> None:
-    """No standard REPL for Rust."""
-    del args  # unused
-    script.warn(f"No REPL available for Rust project {project.path}")
 
 
 @command("license-check", "Check dependency licenses", lang=Lang.Rust)
@@ -2022,18 +1931,6 @@ def cmd_clean_ts(script: Script, project: Project, args: list[str]) -> None:
     script.popd()
 
 
-@command("repl", "Start a REPL", project_only=True, lang=Lang.TypeScript)
-def cmd_repl_ts(script: Script, project: Project, args: list[str]) -> None:
-    """Start a Node.js REPL."""
-    del args  # unused
-    script.info(f"Starting Node REPL for {project.path}")
-    path = script.workspace_path(project.abs_path)
-    is_new = script.enter_project(path)
-    if is_new:
-        project.emit_ts_env(script)
-    script.run(["node"])
-
-
 @command("license-check", "Check dependency licenses", lang=Lang.TypeScript)
 def cmd_license_check_ts(script: Script, project: Project, args: list[str]) -> None:
     """Check dependency licenses (no-op for TypeScript)."""
@@ -2121,13 +2018,6 @@ def cmd_clean_rocq(script: Script, project: Project, args: list[str]) -> None:
         "find . -type f \\( -name '*.vo' -o -name '*.vos' -o -name '*.vok' -o -name '*.glob' -o -name '*.aux' \\) -delete"
     )
     script.run(["rm", "-rf", "doc", script.workspace_path(project.venv_path)])
-
-
-@command("repl", "Start a REPL", project_only=True, lang=Lang.Rocq)
-def cmd_repl_rocq(script: Script, project: Project, args: list[str]) -> None:
-    """Start Rocq repl."""
-    script.info(f"Starting Rocq repl for {project.path}")
-    project.emit_rocq(script, ["repl"] + args)
 
 
 @command("license-check", "Check dependency licenses", lang=Lang.Rocq)
@@ -2869,7 +2759,6 @@ def show_help(all_projects: list[str]) -> None:
     # Group commands
     common = []
     explicit_project = []
-    project_specific = []
     root_specific = []
 
     for name, cmd in sorted(COMMANDS.items()):
@@ -2877,8 +2766,6 @@ def show_help(all_projects: list[str]) -> None:
             explicit_project.append((name, cmd.help))
         elif cmd.root_only:
             root_specific.append((name, cmd.help))
-        elif cmd.project_only:
-            project_specific.append((name, cmd.help))
         else:
             common.append((name, cmd.help))
 
@@ -2888,10 +2775,6 @@ def show_help(all_projects: list[str]) -> None:
 
     print("\nExplicit project targets:")
     for name, help_text in explicit_project:
-        print(f"  {name:20} {help_text}")
-
-    print("\nProject-specific commands:")
-    for name, help_text in project_specific:
         print(f"  {name:20} {help_text}")
 
     if root_specific:
@@ -3057,8 +2940,6 @@ def show_target_help(project_path: str, target_name: str) -> None:
             print("Meta-command expands to:")
             for sub in builtin_cmd.subtargets:
                 print(f"  - {sub}")
-        if builtin_cmd.project_only:
-            print("Note: This command requires a project argument.")
         if builtin_cmd.root_only:
             print("Note: This command runs at root level only.")
         return
@@ -3419,29 +3300,6 @@ def parse_args_sequence(
     return items
 
 
-def validate_project_only_selections(
-    items: list[ProjectItem | CommandItem],
-) -> bool:
-    """Require a preceding explicit project for every project-only command."""
-    has_project_selection = False
-    for item in items:
-        if isinstance(item, ProjectItem):
-            has_project_selection = True
-            continue
-        command_definition = COMMANDS.get(item.name)
-        if (
-            command_definition is not None
-            and command_definition.project_only
-            and not has_project_selection
-        ):
-            log_error(
-                f"{item.name} requires a project "
-                f"(e.g., {cli_invocation()} /lib/core {item.name})"
-            )
-            return False
-    return True
-
-
 def emit_custom_target(
     script: Script, project: Project, steps: list[TargetStep], args: list[str]
 ) -> None:
@@ -3633,13 +3491,6 @@ def run_sequential(
                 dummy = Project(".")
                 emit_command(script, cmd, dummy, item.args, item.excluded_targets)
             else:
-                if cmd and cmd.project_only and not target_projects:
-                    log_error(
-                        f"{item.name} requires a project "
-                        f"(e.g., {cli_invocation()} /lib/core {item.name})"
-                    )
-                    return 1
-
                 run_on = target_projects if target_projects else all_projects
                 for proj_path in run_on:
                     project = Project(proj_path)
@@ -3966,9 +3817,6 @@ Examples:
             show_project_help(project_items[0].path)
             return 0
         log_error("No command specified")
-        return 1
-
-    if not validate_project_only_selections(items):
         return 1
 
     color = not parsed.nocolor

@@ -9,9 +9,7 @@ from glo_build.cli import (
     Script,
     TargetStep,
     cmd_clean_rs,
-    cmd_compile_rs,
     cmd_format_rs,
-    cmd_release_test_rs,
     cmd_typecheck_rs,
     cmd_venv_rs,
     emit_custom_target,
@@ -53,61 +51,8 @@ def test_target_producing_command_emits_bounded_total_cleanup(tmp_path: Path) ->
     subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
 
 
-def test_standard_compile_commands_use_profiles_crossenv_and_retention(
-    tmp_path: Path,
-) -> None:
-    """Compile native and cross artifacts through the shared retention path."""
-    project = make_rust_project(
-        tmp_path,
-        '[package]\nname = "example-package"\nversion = "0.1.0"\n',
-    )
-
-    debug_script = Script(tmp_path, color=False)
-    cmd_compile_rs(debug_script, project, ["debug", "--bin", "example"])
-    assert "cargo build --bin example" in debug_script.to_bash()
-
-    release_script = Script(tmp_path, color=False)
-    cmd_compile_rs(
-        release_script,
-        project,
-        ["release", "x86_64-pc-windows-gnu", "--bin", "example"],
-    )
-    rendered_release = release_script.to_bash()
-    assert (
-        "cargo build --release --target x86_64-pc-windows-gnu --bin example"
-        in rendered_release
-    )
-    assert rendered_release.index("cargo clean --package") < rendered_release.index(
-        "cargo build --release"
-    )
-
-    test_script = Script(tmp_path, color=False)
-    cmd_release_test_rs(test_script, project, ["--test", "cli"])
-    rendered_test = test_script.to_bash()
-    assert "cargo test --release --test cli" in rendered_test
-    assert rendered_test.index("cargo clean --package") < rendered_test.index(
-        "cargo test --release"
-    )
-
-
-def test_compile_requires_a_supported_profile(tmp_path: Path) -> None:
-    """Emit a usage failure instead of guessing a Cargo profile."""
-    project = make_rust_project(
-        tmp_path,
-        '[package]\nname = "example-package"\nversion = "0.1.0"\n',
-    )
-
-    for arguments in ([], ["optimized"]):
-        script = Script(tmp_path, color=False)
-        cmd_compile_rs(script, project, arguments)
-        rendered = script.to_bash()
-        assert "compile debug|release [crossenv]" in rendered
-        assert "exit 2" in rendered
-        assert "cargo build" not in rendered
-
-
-def test_custom_compile_target_overrides_standard_command(tmp_path: Path) -> None:
-    """Keep project-specific compile contracts available under the standard name."""
+def test_project_defined_target_emits_its_own_command(tmp_path: Path) -> None:
+    """Project-defined commands remain available without a built-in counterpart."""
     project = make_rust_project(
         tmp_path,
         '[package]\nname = "example-package"\nversion = "0.1.0"\n',
