@@ -43,6 +43,7 @@ ok "Caddy tooling"
 # --- Bootstrap ---
 step "Configurable notebook paths"
 python3 "${GLO_DIR}/test/base-path.py"
+python3 "${GLO_DIR}/test/notes-index.py"
 ok "Configurable notebook paths"
 
 step "Kanban board CLI and terminal interactions"

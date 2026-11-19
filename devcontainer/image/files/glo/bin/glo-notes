@@ -33,7 +33,7 @@ SELECT '# Note Titles Index
 All notes sorted alphabetically by title.' ||
        COALESCE(char(10) || char(10) || group_concat(link, char(10)), '')
 FROM (
-    SELECT '- [' || title || '](' || path || ')' AS link
+    SELECT '- [' || title || '](' || substr(path, length('${path_filter}') + 1) || ')' AS link
     FROM notes
     ${where_clause}
     ORDER BY title COLLATE NOCASE
@@ -67,7 +67,7 @@ for row in rows:
     if tag != current_tag:
         lines.extend(["", f"## {tag}", ""])
         current_tag = tag
-    lines.append(f"- [{title}]({path})")
+    lines.append(f"- [{title}]({path.removeprefix(sys.argv[2])})")
 print("\n".join(lines))
 conn.close()
 PYEOF
@@ -76,7 +76,26 @@ PYEOF
 cmd_index() {
     [[ -d "${BASE_DIR}/.zk" ]] || { echo "[E] Notebook config not found: ${BASE_DIR}/.zk - run bootstrap.sh first" >&2; exit 1; }
     echo "[I] Indexing notes..."
-    ZK_NOTEBOOK_DIR="$BASE_DIR" zk index --quiet
+    python3 - "$BASE_DIR" <<'PYEOF'
+"""Index notes, retaining errors while omitting expected external-link warnings."""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+notebook = str(Path(sys.argv[1]).resolve())
+result = subprocess.run(
+    ["zk", "index", "--quiet"],
+    env=dict(os.environ, ZK_NOTEBOOK_DIR=notebook),
+    stderr=subprocess.PIPE,
+)
+suffix = (": path is outside the notebook at " + notebook).encode()
+for line in result.stderr.splitlines(keepends=True):
+    outside = line.startswith(b"zk: warning: /") and line.rstrip(b"\r\n").endswith(suffix)
+    if result.returncode or not outside:
+        sys.stderr.buffer.write(line)
+sys.exit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
+PYEOF
     local subdir subdir_path
     for subdir in issue wiki; do
         subdir_path="${BASE_DIR}/${subdir}"
